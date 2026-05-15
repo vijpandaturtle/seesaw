@@ -1,0 +1,25 @@
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "seesaw"
+version = "0.1.0"
+description = "Seesaw: mechanistic interpretability tools for multimodal models"
+readme = "README.md"
+requires-python = ">=3.9"
+
+dependencies = [
+    "torch",
+    "numpy",
+    "Pillow",
+    "matplotlib",
+    "scikit-learn",
+    "torchvision",
+]
+
+[tool.setuptools]
+package-dir = {"" = "."}
+
+[tool.setuptools.packages.find]
+where = ["."]

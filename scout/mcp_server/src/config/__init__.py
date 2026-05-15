@@ -1,0 +1,25 @@
+from .settings import (
+    ANTHROPIC_API_KEY,
+    FIRECRAWL_API_KEY,
+    OUTPUTS_DIR,
+    SCOUT_MODEL,
+    SCOUT_MAX_TOKENS,
+    SCOUT_TEMPERATURE,
+    MAX_AGE_ONE_WEEK,
+    MAX_RETRIES,
+    MAX_CHARS,
+)
+from .prompts import SCOUT_SYSTEM_PROMPT
+
+__all__ = [
+    "ANTHROPIC_API_KEY",
+    "FIRECRAWL_API_KEY",
+    "OUTPUTS_DIR",
+    "SCOUT_MODEL",
+    "SCOUT_MAX_TOKENS",
+    "SCOUT_TEMPERATURE",
+    "MAX_AGE_ONE_WEEK",
+    "MAX_RETRIES",
+    "MAX_CHARS",
+    "SCOUT_SYSTEM_PROMPT",
+]
