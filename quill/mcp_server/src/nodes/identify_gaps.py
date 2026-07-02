@@ -2,7 +2,7 @@ from langchain_anthropic import ChatAnthropic
 from langchain_core.messages import HumanMessage, SystemMessage
 
 from ..app.helpers import bundle_to_context
-from ..app.schemas import GapsOutput
+from ..models.schemas import GapsOutput
 from ..config import (
     ANTHROPIC_API_KEY,
     IDENTIFY_GAPS_SYSTEM,

@@ -11,7 +11,7 @@ from langgraph.checkpoint.memory import MemorySaver
 from langgraph.graph import END, StateGraph
 from typing_extensions import TypedDict
 
-from ..app.schemas import (
+from ..models.schemas import (
     CritiqueReport,
     ExperimentBundle,
     ExperimentCritiquesOutput,

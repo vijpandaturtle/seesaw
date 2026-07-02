@@ -1,7 +1,7 @@
 from langchain_anthropic import ChatAnthropic
 from langchain_core.messages import HumanMessage, SystemMessage
 
-from ..app.schemas import FollowUpsOutput
+from ..models.schemas import FollowUpsOutput
 from ..config import (
     ANTHROPIC_API_KEY,
     GENERATE_FOLLOWUPS_SYSTEM,

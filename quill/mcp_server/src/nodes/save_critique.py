@@ -2,7 +2,7 @@ import json
 from datetime import datetime
 
 from ..app.helpers import render_critique_markdown
-from ..app.schemas import CritiqueReport
+from ..models.schemas import CritiqueReport
 from ..config import OUTPUTS_DIR
 
 

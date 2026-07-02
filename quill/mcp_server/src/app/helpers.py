@@ -1,4 +1,4 @@
-from .schemas import CritiqueReport, ExperimentBundle, ExperimentResult
+from ..models.schemas import CritiqueReport, ExperimentBundle, ExperimentResult
 
 
 def format_result_for_context(result: ExperimentResult) -> str:
