@@ -1,6 +1,6 @@
 <div align="center">
 
-# 🪶 Seesaw
+# Seesaw
 
 **A multi-agent framework for automated mechanistic interpretability research**
 
