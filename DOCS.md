@@ -56,13 +56,11 @@ python -m orchestrator.src.main --question "<research question>" [--skip-hitl]
 
 **Pipeline flow** (`orchestrator/src/pipeline.py`):
 
-```
-Scout  → research_plan.md
-       ↓  [HITL: approve plan?]
-Lens   → results_bundle.json
-       ↓  [HITL: send to Quill?]
-Quill  → critique_<timestamp>.json / .md
-```
+| Stage | Output | Checkpoint after |
+|---|---|---|
+| Scout | `research_plan.md` | Approve the plan? |
+| Lens | `results_bundle.json` | Send results to Quill? |
+| Quill | `critique_<timestamp>.json` / `.md` | — |
 
 Each stage writes to disk before the next one reads from disk — there's no in-memory handoff. This means you can inspect intermediate output, or re-run a single stage without repeating the others (see below).
 
