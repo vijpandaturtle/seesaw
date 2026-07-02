@@ -9,7 +9,7 @@
 [![Built with LangGraph](https://img.shields.io/badge/built%20with-LangGraph-1c1c1c.svg)](https://github.com/langchain-ai/langgraph)
 [![MCP](https://img.shields.io/badge/protocol-MCP-purple.svg)](https://modelcontextprotocol.io)
 
-[Setup & Usage Docs](DOCS.md) · [Roadmap](ROADMAP.md) · [Architecture](#architecture) · [Blog](https://mindsandai.substack.com)
+[Setup & Usage Docs](DOCS.md) · [Architecture](#architecture) · [Blog](https://mindsandai.substack.com)
 
 </div>
 
