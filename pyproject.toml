@@ -16,6 +16,17 @@ dependencies = [
     "matplotlib",
     "scikit-learn",
     "torchvision",
+    "python-dotenv",
+    "langchain-core",
+    "langchain-anthropic",
+    "langgraph",
+    "arxiv",
+    "firecrawl-py",
+    "fastmcp",
+    "mcp",
+    "langchain-mcp-adapters",
+    "transformer-lens",
+    "sae-lens",
 ]
 
 [tool.setuptools]
