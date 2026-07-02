@@ -4,8 +4,6 @@ A multi-agent framework for automated mechanistic interpretability research.
 
 ![Seesaw v0 Architecture](assets/seesaw-v0.jpg)
 
----
-
 ## Overview
 
 Seesaw automates the hypothesis-experiment-critique loop in mechanistic interpretability.
@@ -16,8 +14,6 @@ Scout → [Research Plan] → Lens → [ExperimentBundle] → Quill → [Critiqu
 ```
 
 Human-in-the-loop checkpoints sit between agents so you stay in control of what runs.
-
----
 
 ## Agents
 
@@ -49,22 +45,11 @@ that Lens can execute directly.
 
 **Stack:** LangGraph StateGraph, Claude Opus
 
----
-
 ## Motivation
 
 Most mechanistic interpretability work is done manually — identify a circuit, ablate it,
 write it up. Seesaw is an experiment in automating the research loop, with the goal of
 accelerating exploratory safety research on small models.
-
----
-
-## Status
-
-Active development. Agents are functional as standalone modules.
-Orchestrator wiring and MCP server implementations are in progress.
-
----
 
 ## License
 
