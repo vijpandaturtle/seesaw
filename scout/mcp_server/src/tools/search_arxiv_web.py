@@ -29,32 +29,23 @@ def search_arxiv_web(query: str, limit: int = 5) -> str:
     try:
         response = app.search(arxiv_query, limit=limit)
 
-        raw_results = getattr(response, "data", None) or response
-        if isinstance(raw_results, dict):
-            raw_results = raw_results.get("data", [])
+        # response is a SearchData object — web results live under .web.
+        raw_results = response.web or []
 
         if not raw_results:
             return f"No arxiv.org results found for: '{query}'"
 
         results = []
         for r in raw_results:
-            if isinstance(r, dict):
-                title   = r.get("title", "N/A")
-                url     = r.get("url", "N/A")
-                snippet = r.get("description") or r.get("markdown", "")
-            else:
-                title   = getattr(r, "title", "N/A")
-                url     = getattr(r, "url", "N/A")
-                snippet = getattr(r, "description", None) or getattr(r, "markdown", "") or ""
-
             # Only keep actual arxiv.org links
-            if "arxiv.org" not in str(url):
+            if "arxiv.org" not in str(r.url or ""):
                 continue
 
+            snippet = (r.description or "")[:400]
             results.append(
-                f"**Title**: {title}\n"
-                f"**URL**: {url}\n"
-                f"**Snippet**: {str(snippet)[:400]}...\n"
+                f"**Title**: {r.title or 'N/A'}\n"
+                f"**URL**: {r.url or 'N/A'}\n"
+                f"**Snippet**: {snippet}...\n"
             )
 
         if not results:

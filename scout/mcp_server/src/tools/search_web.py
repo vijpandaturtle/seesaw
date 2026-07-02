@@ -26,27 +26,21 @@ def search_web(query: str, limit: int = 5) -> str:
     try:
         response = app.search(query, limit=limit)
 
-        raw_results = getattr(response, "data", None) or response
-        if isinstance(raw_results, dict):
-            raw_results = raw_results.get("data", [])
+        # response is a SearchData object — web results live under .web,
+        # not .data. Iterating over the object itself (a pydantic model)
+        # silently yields its (field_name, field_value) pairs instead of
+        # results, which is a bug this fix avoids.
+        raw_results = response.web or []
 
         if not raw_results:
             return f"No web results found for: '{query}'"
 
         results = []
         for r in raw_results:
-            if isinstance(r, dict):
-                title   = r.get("title", "N/A")
-                url     = r.get("url", "N/A")
-                snippet = r.get("description") or r.get("markdown", "")[:400]
-            else:
-                title   = getattr(r, "title", "N/A")
-                url     = getattr(r, "url", "N/A")
-                snippet = (getattr(r, "description", None) or getattr(r, "markdown", "") or "")[:400]
-
+            snippet = (r.description or "")[:400]
             results.append(
-                f"**Title**: {title}\n"
-                f"**URL**: {url}\n"
+                f"**Title**: {r.title or 'N/A'}\n"
+                f"**URL**: {r.url or 'N/A'}\n"
                 f"**Snippet**: {snippet}...\n"
             )
 
