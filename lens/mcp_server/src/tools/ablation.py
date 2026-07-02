@@ -9,15 +9,15 @@ from transformer_lens import HookedTransformer
 matplotlib.use("Agg")
 
 from ..app.helpers import get_logit_diff, tokens_to_ids
-from ..app.schemas import ExperimentResult
+from ..models.schemas import ExperimentResult
 from ..config import PLOTS_DIR
 
 
 def run_ablation(
     model: HookedTransformer,
     prompts: list[str],
-    io_tokens: list[str],
-    subject_tokens: list[str],
+    positive_tokens: list[str],
+    negative_tokens: list[str],
     ablation_type: Literal["zero", "mean"] = "mean",
     output_dir: Path = PLOTS_DIR,
 ) -> ExperimentResult:
@@ -31,8 +31,8 @@ def run_ablation(
     Args:
         model: Loaded HookedTransformer.
         prompts: List of input prompt strings.
-        io_tokens: Correct (indirect object) token strings.
-        subject_tokens: Incorrect (subject) token strings.
+        positive_tokens: Tokens to boost (e.g. [" Mary"] for IOI, [" she"] for gender bias).
+        negative_tokens: Tokens to suppress (e.g. [" John"] for IOI, [" he"] for gender bias).
         ablation_type: "zero" to zero out the head, "mean" to replace with mean activation.
         output_dir: Directory to save the plot.
 
@@ -43,8 +43,8 @@ def run_ablation(
     tokens   = model.to_tokens(prompts)
     n_layers = model.cfg.n_layers
     n_heads  = model.cfg.n_heads
-    io_ids   = tokens_to_ids(model, io_tokens)
-    s_ids    = tokens_to_ids(model, subject_tokens)
+    io_ids   = tokens_to_ids(model, positive_tokens)
+    s_ids    = tokens_to_ids(model, negative_tokens)
 
     baseline_ld = get_logit_diff(model, tokens, io_ids, s_ids)
     print(f"  Baseline logit diff: {baseline_ld:.4f}")
@@ -119,8 +119,8 @@ def run_ablation(
             "baseline_ld":    round(baseline_ld, 4),
             "effects":        ablation_effects.tolist(),
             "top_heads":      [(f"L{l}H{h}", round(v, 4)) for l, h, v in top_heads],
-            "io_tokens":      io_tokens,
-            "subject_tokens": subject_tokens,
+            "positive_tokens": positive_tokens,
+            "negative_tokens": negative_tokens,
         },
         status="success",
     )

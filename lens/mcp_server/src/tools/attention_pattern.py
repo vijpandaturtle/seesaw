@@ -8,7 +8,7 @@ from transformer_lens import HookedTransformer
 
 matplotlib.use("Agg")
 
-from ..app.schemas import ExperimentResult
+from ..models.schemas import ExperimentResult
 from ..config import PLOTS_DIR
 
 

@@ -1,6 +1,6 @@
 import concurrent.futures
 
-from .schemas import ExperimentResult
+from ..models.schemas import ExperimentResult
 from ..config import SANDBOX_TIMEOUT
 
 

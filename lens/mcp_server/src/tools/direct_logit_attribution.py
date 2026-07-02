@@ -8,15 +8,15 @@ from transformer_lens import HookedTransformer
 matplotlib.use("Agg")
 
 from ..app.helpers import tokens_to_ids
-from ..app.schemas import ExperimentResult
+from ..models.schemas import ExperimentResult
 from ..config import PLOTS_DIR
 
 
 def run_direct_logit_attribution(
     model: HookedTransformer,
     prompts: list[str],
-    io_tokens: list[str],
-    subject_tokens: list[str],
+    positive_tokens: list[str],
+    negative_tokens: list[str],
     pos: int = -1,
     output_dir: Path = PLOTS_DIR,
 ) -> ExperimentResult:
@@ -31,8 +31,8 @@ def run_direct_logit_attribution(
     Args:
         model: Loaded HookedTransformer.
         prompts: List of input prompt strings.
-        io_tokens: Correct (indirect object) token strings, e.g. [" Mary", " Tom"].
-        subject_tokens: Incorrect (subject) token strings, e.g. [" John", " Sarah"].
+        positive_tokens: Tokens to boost (e.g. [" Mary"] for IOI, [" she"] for gender bias).
+        negative_tokens: Tokens to suppress (e.g. [" John"] for IOI, [" he"] for gender bias).
         pos: Token position to read logits from (-1 = last token).
         output_dir: Directory to save the plot.
 
@@ -45,8 +45,8 @@ def run_direct_logit_attribution(
     n_heads  = model.cfg.n_heads
     W_U      = model.W_U   # [d_model, d_vocab]
 
-    io_ids = tokens_to_ids(model, io_tokens)
-    s_ids  = tokens_to_ids(model, subject_tokens)
+    io_ids = tokens_to_ids(model, positive_tokens)
+    s_ids  = tokens_to_ids(model, negative_tokens)
 
     # Build IO - Subject direction in vocab space, then detach to avoid requires_grad
     logit_diff_dir = torch.zeros(model.cfg.d_model)
@@ -114,8 +114,8 @@ def run_direct_logit_attribution(
             "head_attrs":     head_attrs.tolist(),
             "mlp_attrs":      mlp_attrs.tolist(),
             "top_heads":      [(f"L{l}H{h}", round(v, 4)) for l, h, v in top_heads],
-            "io_tokens":      io_tokens,
-            "subject_tokens": subject_tokens,
+            "positive_tokens": positive_tokens,
+            "negative_tokens": negative_tokens,
         },
         status="success",
     )

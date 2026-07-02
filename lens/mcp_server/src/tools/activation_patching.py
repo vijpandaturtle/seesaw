@@ -8,7 +8,7 @@ from transformer_lens import HookedTransformer
 matplotlib.use("Agg")
 
 from ..app.helpers import get_logit_diff, tokens_to_ids
-from ..app.schemas import ExperimentResult
+from ..models.schemas import ExperimentResult
 from ..config import PLOTS_DIR
 
 
@@ -16,8 +16,8 @@ def run_activation_patching(
     model: HookedTransformer,
     prompts: list[str],
     corrupted_prompts: list[str],
-    io_tokens: list[str],
-    subject_tokens: list[str],
+    positive_tokens: list[str],
+    negative_tokens: list[str],
     output_dir: Path = PLOTS_DIR,
 ) -> ExperimentResult:
     """Activation patching: for each layer × position, patch the residual stream
@@ -30,8 +30,8 @@ def run_activation_patching(
         model: Loaded HookedTransformer.
         prompts: Clean prompts (model gets the right answer).
         corrupted_prompts: Corrupted prompts (model gets the wrong answer, e.g. names swapped).
-        io_tokens: Correct (indirect object) token strings.
-        subject_tokens: Incorrect (subject) token strings.
+        positive_tokens: Tokens to boost (e.g. [" Mary"] for IOI, [" she"] for gender bias).
+        negative_tokens: Tokens to suppress (e.g. [" John"] for IOI, [" he"] for gender bias).
         output_dir: Directory to save the plot.
 
     Returns:
@@ -42,8 +42,8 @@ def run_activation_patching(
     corrupt_tokens = model.to_tokens(corrupted_prompts)
     n_layers = model.cfg.n_layers
     seq_len  = clean_tokens.shape[1]
-    io_ids   = tokens_to_ids(model, io_tokens)
-    s_ids    = tokens_to_ids(model, subject_tokens)
+    io_ids   = tokens_to_ids(model, positive_tokens)
+    s_ids    = tokens_to_ids(model, negative_tokens)
 
     clean_ld   = get_logit_diff(model, clean_tokens,   io_ids, s_ids)
     corrupt_ld = get_logit_diff(model, corrupt_tokens, io_ids, s_ids)
@@ -120,6 +120,8 @@ def run_activation_patching(
             "patch_effects":              patch_effects.tolist(),
             "token_strs":                 token_strs,
             "top_recovery_positions":     [(f"L{l} tok='{t}'", round(v, 4)) for l, t, v in top_pos],
+            "positive_tokens":            positive_tokens,
+            "negative_tokens":            negative_tokens,
             "corrupted_prompts":          corrupted_prompts,
         },
         status="success",

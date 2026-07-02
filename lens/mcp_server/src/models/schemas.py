@@ -2,7 +2,10 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Literal
 
+from pydantic import BaseModel
 
+
+# ── Core data models ────────────────────────────────────────────────────────
 @dataclass
 class ExperimentSpec:
     """Describes a single experiment for Lens to run."""
@@ -44,3 +47,33 @@ class ExperimentBundle:
     @property
     def failed(self) -> list[ExperimentResult]:
         return [r for r in self.results if r.status != "success"]
+
+
+# ── Structured output models for the workflow's Claude calls ────────────────
+class ExperimentSpecModel(BaseModel):
+    """LLM-parsed experiment spec, before it becomes an ExperimentSpec dataclass."""
+    name: str
+    tool: str
+    model_name: str
+    prompts: list[str]
+    what_to_measure: str
+    hypothesis_tested: str
+    expected_outcome: str
+    tool_kwargs: dict = {}
+
+
+class ParsedPlanModel(BaseModel):
+    """Structured output of the parse_plan node."""
+    research_question: str
+    model_name: str
+    experiments: list[ExperimentSpecModel]
+
+
+class FollowUpDecision(BaseModel):
+    """Structured output of the check_followup node."""
+    needs_followup: bool
+    reason: str
+    followup_tool: str | None = None
+    followup_prompts: list[str] = []
+    followup_description: str | None = None
+    followup_kwargs: dict = {}
