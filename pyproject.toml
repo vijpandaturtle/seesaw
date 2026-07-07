@@ -27,6 +27,7 @@ dependencies = [
     "langchain-mcp-adapters",
     "transformer-lens",
     "sae-lens",
+    "streamlit",
 ]
 
 [tool.setuptools]
