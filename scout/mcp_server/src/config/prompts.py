@@ -23,7 +23,6 @@ Your final output passed to `save_research_plan` MUST follow this exact structur
 ```
 # Research Plan: <research_question>
 
-**Date**: <date>
 **Status**: Draft
 
 ---
