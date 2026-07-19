@@ -1,0 +1,28 @@
+task:
+  id: "greater_than_1"
+  desc: >
+    Identify the GPT-2 Small circuit for the greater-than task ("The war lasted from
+    1732 to 17..." -> years > 32). Hanna et al. (2023). Metric is a probability sum
+    over ~80 valid year tokens, not a single logit-diff pair.
+  question: "How does GPT-2 Small compute greater-than comparisons for year completions?"
+  model: gpt2
+  target: pipeline
+  graders:
+    - type: deterministic_tests
+      required: [test_greater_than_prob_mass.py]
+    - type: llm_rubric
+      rubric: rubrics/hypothesis_specificity.md
+      target: scout
+    - type: state_check
+      expect:
+        research_plan: {saved: true}
+        experiment_bundle: {schema_valid: true, min_successful_results: 2}
+    - type: tool_calls
+      required:
+        - {tool: ablation}
+        - {tool: attention_pattern}
+  tracked_metrics:
+    - type: transcript
+      metrics: [n_turns, n_toolcalls, n_total_tokens]
+    - type: latency
+      metrics: [time_to_first_token, time_to_last_token]

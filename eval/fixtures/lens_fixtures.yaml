@@ -1,0 +1,168 @@
+# Lens grader-validation fixtures. Balanced pass/fail per grader.
+# ExperimentResult.data shape mirrors the real tools (top_heads, baseline_ld, ...).
+fixtures:
+  # ── numeric_correctness (code) ─────────────────────────────────────────────
+  - id: numeric_correctness_pass
+    grader: lens.numeric_correctness
+    expected: pass
+    inputs:
+      result:
+        tool: direct_logit_attribution
+        status: success
+        summary: "L9H6 and L9H9 dominate; baseline logit diff 3.36."
+        data:
+          top_heads: [[L9H6, 4.1], [L9H9, 3.8], [L10H0, 1.2]]
+          baseline_ld: 3.36
+      expected_heads: [L9H6, L9H9]
+      baseline_range: [2.5, 3.5]
+
+  - id: numeric_correctness_fail
+    grader: lens.numeric_correctness
+    expected: fail
+    inputs:
+      result:
+        tool: direct_logit_attribution
+        status: success
+        data:
+          top_heads: [[L0H0, 1.0], [L1H1, 0.9], [L2H2, 0.5]]
+          baseline_ld: 9.9
+      expected_heads: [L9H6, L9H9]
+      baseline_range: [2.5, 3.5]
+
+  # ── robustness (code) ──────────────────────────────────────────────────────
+  - id: robustness_pass
+    grader: lens.robustness
+    expected: pass
+    inputs:
+      per_variation_pass: [true, true, true, true, true]
+
+  - id: robustness_fail
+    grader: lens.robustness
+    expected: fail
+    note: "pass@5=True but pass^5=False — held in some prompts, not all."
+    inputs:
+      per_variation_pass: [true, false, true, true, false]
+
+  # ── tool_execution_valid (code) ────────────────────────────────────────────
+  - id: tool_execution_valid_pass
+    grader: lens.tool_execution_valid
+    expected: pass
+    inputs:
+      result:
+        tool: ablation
+        status: success
+        data: {baseline_ld: 3.36, top_heads: [[L9H6, 0.9]]}
+        error: null
+
+  - id: tool_execution_valid_fail
+    grader: lens.tool_execution_valid
+    expected: fail
+    inputs:
+      result:
+        tool: ablation
+        status: failed
+        data: {}
+        error: "CUDA out of memory"
+
+  # ── plan_execution_fidelity (code) ─────────────────────────────────────────
+  - id: plan_execution_fidelity_pass
+    grader: lens.plan_execution_fidelity
+    expected: pass
+    inputs:
+      planned:
+        - {name: dla, tool: direct_logit_attribution, prompts: ["When Mary and John..."]}
+        - {name: abl, tool: ablation, prompts: ["When Mary and John..."]}
+      executed:
+        - {tool: direct_logit_attribution, prompts: ["When Mary and John..."]}
+        - {tool: ablation, prompts: ["When Mary and John..."]}
+
+  - id: plan_execution_fidelity_fail
+    grader: lens.plan_execution_fidelity
+    expected: fail
+    note: "Planned 3, only 1 ran as specified -> 0.33."
+    inputs:
+      planned:
+        - {name: dla, tool: direct_logit_attribution, prompts: ["p"]}
+        - {name: abl, tool: ablation, prompts: ["p"]}
+        - {name: patch, tool: activation_patching, prompts: ["p"]}
+      executed:
+        - {tool: direct_logit_attribution, prompts: ["p"]}
+
+  # ── operational_cost (code) ────────────────────────────────────────────────
+  - id: operational_cost_pass
+    grader: lens.operational_cost
+    expected: pass
+    inputs:
+      metrics: {latency_s: 12, peak_mem_gb: 3.5, model_load_s: 8}
+      thresholds: {latency_s: 60, peak_mem_gb: 8, model_load_s: 30}
+
+  - id: operational_cost_fail
+    grader: lens.operational_cost
+    expected: fail
+    inputs:
+      metrics: {latency_s: 240, peak_mem_gb: 14, model_load_s: 120}
+      thresholds: {latency_s: 60, peak_mem_gb: 8, model_load_s: 30}
+
+  # ── prose_data_consistency (code) ──────────────────────────────────────────
+  - id: prose_data_consistency_pass
+    grader: lens.prose_data_consistency
+    expected: pass
+    inputs:
+      result:
+        tool: direct_logit_attribution
+        summary: "Baseline logit diff is 3.36; L9H6 contributes 4.10."
+        data: {baseline_ld: 3.36, top_heads: [[L9H6, 4.10], [L9H9, 3.80]]}
+
+  - id: prose_data_consistency_fail
+    grader: lens.prose_data_consistency
+    expected: fail
+    note: "Summary quotes 9.99, which appears nowhere in data."
+    inputs:
+      result:
+        tool: direct_logit_attribution
+        summary: "The baseline logit diff was measured at 9.99."
+        data: {baseline_ld: 3.36, top_heads: [[L9H6, 4.10]]}
+
+  # ── interpretation_faithfulness (llm) ──────────────────────────────────────
+  - id: interpretation_faithfulness_pass
+    grader: lens.interpretation_faithfulness
+    expected: pass
+    tags: [llm]
+    inputs:
+      result:
+        tool: direct_logit_attribution
+        summary: "DLA finds L9H6 (4.1) and L9H9 (3.8) as the top positive-attribution heads toward the IO token."
+        data: {top_heads: [[L9H6, 4.1], [L9H9, 3.8]], baseline_ld: 3.36}
+
+  - id: interpretation_faithfulness_fail
+    grader: lens.interpretation_faithfulness
+    expected: fail
+    tags: [llm]
+    note: "Summary asserts far more than the numbers support."
+    inputs:
+      result:
+        tool: direct_logit_attribution
+        summary: "Every attention head contributes equally; the model has no localized IOI circuit and L9H6 is irrelevant."
+        data: {top_heads: [[L9H6, 4.1], [L9H9, 3.8]], baseline_ld: 3.36}
+
+  # ── causal_correlational_honesty (llm) ─────────────────────────────────────
+  - id: causal_correlational_honesty_pass
+    grader: lens.causal_correlational_honesty
+    expected: pass
+    tags: [llm]
+    inputs:
+      result:
+        tool: direct_logit_attribution
+        summary: "L9H6 shows the strongest positive attribution toward the IO token, consistent with a name-mover role."
+        data: {top_heads: [[L9H6, 4.1]]}
+
+  - id: causal_correlational_honesty_fail
+    grader: lens.causal_correlational_honesty
+    expected: fail
+    tags: [llm]
+    note: "Claims necessity/causation from DLA (a correlational tool)."
+    inputs:
+      result:
+        tool: direct_logit_attribution
+        summary: "This proves L9H6 is causally necessary for IOI — removing it would break the behaviour."
+        data: {top_heads: [[L9H6, 4.1]]}

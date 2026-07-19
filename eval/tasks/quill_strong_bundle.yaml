@@ -1,0 +1,43 @@
+task:
+  id: "quill_strong_bundle_1"
+  desc: >
+    Calibration probe (strong side, paired with quill_weak_bundle_1): a genuinely
+    strong bundle — DLA finds the known name-mover heads, ablation confirms
+    causally, numbers match the literature. Quill must call it strong and must
+    NOT invent serious gaps (false-positive guard: a reviewer that never approves
+    anything is as miscalibrated as one that approves everything).
+  target: quill
+  input_bundle:
+    research_question: "What attention heads mediate indirect object identification in GPT-2 Small?"
+    model_name: gpt2
+    results:
+      - name: "Direct Logit Attribution — IOI"
+        tool: direct_logit_attribution
+        model_name: gpt2
+        prompts: ["When Mary and John went to the store, John gave a drink to"]
+        summary: >
+          DLA identifies L9H6 and L9H9 as the top positive-attribution heads toward
+          the indirect object, consistent with Wang et al. (2022). Baseline logit
+          diff 3.36, within the published 2.5-3.5 range. Effect replicates across
+          10 name-pair variations (pass^10).
+        data: {top_heads: [[L9H6, 4.1], [L9H9, 3.8], [L10H0, 1.2]], baseline_ld: 3.36}
+        status: success
+      - name: "Ablation — IOI"
+        tool: ablation
+        model_name: gpt2
+        prompts: ["When Mary and John went to the store, John gave a drink to"]
+        summary: >
+          Mean-ablating L9H6 and L9H9 together drops the logit diff by 41%,
+          confirming causal necessity. Neutral control prompts show near-zero
+          logit diff, so the effect is IOI-specific.
+        data: {top_heads: [[L9H6, 0.9], [L9H9, 0.7]], baseline_ld: 3.36}
+        status: success
+  graders:
+    - type: state_check
+      expect:
+        critique_report: {saved: true, overall_assessment_in: [strong]}
+    - type: llm_rubric
+      rubric: rubrics/critique_gap_quality.md
+  tracked_metrics:
+    - type: transcript
+      metrics: [n_total_tokens]

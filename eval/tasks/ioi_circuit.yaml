@@ -1,0 +1,29 @@
+task:
+  id: "ioi_circuit_1"
+  desc: >
+    Identify the attention heads that mediate indirect object identification (IOI)
+    in GPT-2 Small, with causal evidence — not just correlational attribution.
+  question: "What attention heads mediate indirect object identification in GPT-2 Small?"
+  model: gpt2
+  target: pipeline          # scout -> lens -> quill
+  graders:
+    - type: deterministic_tests
+      required:
+        - test_ioi_dla_finds_name_movers.py    # L9H6/L9H9 in top-5 DLA, pass^k across name pairs
+        - test_ioi_baseline_logit_diff.py       # baseline logit diff in the published range
+    - type: llm_rubric
+      rubric: rubrics/hypothesis_specificity.md
+      target: scout
+    - type: state_check
+      expect:
+        research_plan: {saved: true}
+        experiment_bundle: {schema_valid: true, min_successful_results: 2}
+    - type: tool_calls
+      required:
+        - {tool: direct_logit_attribution}
+        - {tool: ablation}                       # causal tool required, not just DLA
+  tracked_metrics:
+    - type: transcript
+      metrics: [n_turns, n_toolcalls, n_total_tokens]
+    - type: latency
+      metrics: [time_to_first_token, output_tokens_per_sec, time_to_last_token]

@@ -6,7 +6,7 @@ Seesaw is a three-agent pipeline for mechanistic interpretability research:
 - **Lens** — runs TransformerLens experiments (logit lens, attention patterns, ablation, activation patching, direct logit attribution) specified by the plan
 - **Quill** — critiques the results, identifies gaps, and generates follow-up experiment specs
 
-An **orchestrator** chains the three together with two human-in-the-loop (HITL) checkpoints. Each agent is also independently runnable as an MCP server.
+An **orchestrator** chains the three together with two human-in-the-loop (HITL) checkpoints. Each agent is also independently runnable as an MCP server. An **eval suite** (`eval/`) grades all three agents — and grades its own graders first (see [Evaluation](#evaluation)).
 
 ---
 
@@ -216,6 +216,85 @@ asyncio.run(main())
 ```
 
 This exercises the actual MCP protocol layer (unlike calling the Python functions directly), which is where router wiring bugs show up.
+
+---
+
+## Evaluation
+
+The eval suite lives in `eval/` and is built in three layers. The core rule: **fixtures test the graders; tasks test the agents** — and grader trust is established (via fixtures) before any agent score is taken seriously.
+
+```
+eval/
+├── graders/      # 29 pure grading functions (scout.py, lens.py, quill.py)
+│   ├── base.py               # GraderResult, judge() (LLM-as-judge, claude-opus-4-8)
+│   └── langsmith_adapter.py  # wrap any grader into a LangSmith evaluator
+├── fixtures/     # 56 canned artifacts with known verdicts — the grader meta-eval
+├── tasks/        # 15 live-agent benchmark tasks (*.yaml) + loader
+├── rubrics/      # 5 markdown rubrics used by llm_rubric graders
+└── runner/       # executes tasks: agent adapters, grader dispatch, LangSmith upload
+```
+
+### Layer 1 — Graders (`eval/graders/`)
+
+A grader is a pure function: `(artifact, reference) -> GraderResult` (normalized score in `[0,1]`, raw metrics, one-line detail). It never runs an agent. Three kinds:
+
+| Kind | Mechanism | Examples |
+|---|---|---|
+| `code` | deterministic rule, no model call | `lens.numeric_correctness` (expected heads in top-k), `lens.robustness` (pass@k / pass^k across prompt variations), `quill.followup_executable` |
+| `llm` | LLM-as-judge over free text | `scout.hypothesis_specificity`, `lens.causal_correlational_honesty`, `quill.gap_recall` |
+| `human` | packages a review payload for an expert; no auto-score | `scout.researcher_would_run`, `quill.matches_expert` |
+
+All 29 are enumerable via `eval.graders.REGISTRY`. The judge model is set in `eval/graders/base.py` (`JUDGE_MODEL`); note it takes no `temperature` — Opus 4.8 rejects sampling params.
+
+### Layer 2 — Fixtures (`eval/fixtures/`): grading the graders
+
+Each fixture is a canned artifact plus the verdict its grader **must** produce (`expected: pass | fail | na`). Every auto-gradable grader has at least one pass **and** one fail fixture, so a grader that always says yes (or always says no) is caught immediately. LLM-grader fixtures use a dead-band: pass requires score ≥ 0.6, fail requires ≤ 0.4; anything between is `indeterminate` and flags the fixture or judge for review rather than flapping.
+
+```bash
+# Code-grader fixtures — free, offline, run whenever you touch a grader
+python -c "from eval.fixtures import check_offline; print(check_offline()['mismatches'] or 'all green')"
+
+# LLM-grader fixtures — real judge calls (~24), run when you change the judge or rubrics
+python -c "from dotenv import load_dotenv; load_dotenv(); from eval.fixtures import check_llm; print(check_llm(agent='scout'))"
+```
+
+A mismatch means the grader **or the fixture label** is wrong — read the judge's reasoning in the result before deciding which (this has happened: an ambiguous fixture scored exactly 0.5 and the dead-band caught it).
+
+### Layer 3 — Tasks (`eval/tasks/`) and the runner (`eval/runner/`)
+
+A task is a YAML spec: a unit of work for the live agents plus the graders to apply to whatever they produce. There is no per-task `expected:` — the score *is* the measurement. Balance comes from paired opposites instead: 8 ground-truth circuit tasks (IOI, greater-than, gender bias, induction, successor, copy suppression, ROME, docstring) and 7 adversarial probes (tool-bias questions Scout should refuse to force-fit, a causal-language trap for Lens, weak/strong calibration bundles for Quill).
+
+Grader `type` vocabulary (validated by `eval/tasks/loader.py`):
+
+| `type` | Checks | Config keys |
+|---|---|---|
+| `deterministic_tests` | named pytest files under `eval/tests/` | `required` |
+| `llm_rubric` | judge + a rubric from `eval/rubrics/` | `rubric`, optional `target`, `model` |
+| `static_analysis` | linters over produced code | `commands`, optional `paths` |
+| `state_check` | artifacts/state (plan saved, bundle schema, assessment value) | `expect` |
+| `tool_calls` | trajectory contains / avoids tool calls (glob params) | `required`, optional `forbidden` |
+
+Handlers never silently pass: a missing test file or unimplemented `state_check` key surfaces as an explicit error result.
+
+```bash
+python -m eval.runner --list                          # all tasks
+python -m eval.runner quill_weak_bundle_1             # run one locally → outputs/eval_runs/*.json
+python -m eval.runner.langsmith_runner --all-cheap    # run non-pipeline tasks as a LangSmith experiment
+```
+
+The LangSmith runner registers every task as an example in the `seesaw-tasks` dataset, executes agents via `run_task`, and fans each grader result out as its own feedback score — so the experiment table shows one column per criterion, comparisons across experiments give per-criterion regressions, and `LANGSMITH_TRACING` nests the full agent trace under each row. Requires `LANGSMITH_API_KEY` in `.env`. A local Streamlit alternative (fixture health + persisted runs) is at `ui/pages/1_Eval_Dashboard.py`.
+
+### Adding to the suite
+
+- **New grader** — write the pure function in `eval/graders/<agent>.py`, register it in `REGISTRY`, then add a pass and a fail fixture before trusting it.
+- **New fixture** — append to `eval/fixtures/<agent>_fixtures.yaml` (`grader`, `expected`, `inputs`, tag `[llm]` if it needs the judge); rerun the checks above.
+- **New task** — drop a YAML in `eval/tasks/` (the loader validates shape, grader types, and metric names on load); reference only rubrics that exist in `eval/rubrics/`.
+
+### Known gaps
+
+- The `deterministic_tests` files referenced by the 8 pipeline tasks (`eval/tests/*.py`) are not yet written — the runner reports them as explicit errors until they exist.
+- Token usage (`n_total_tokens`) is captured for Scout but not Lens/Quill (their graphs are `invoke()`d; per-call usage is visible in LangSmith traces instead).
+- Human graders (`researcher_would_run`, `matches_expert`) export review payloads but no expert scores have been recorded yet.
 
 ---
 

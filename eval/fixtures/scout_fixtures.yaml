@@ -1,0 +1,194 @@
+# Scout grader-validation fixtures. Balanced pass/fail per grader.
+# tags: [] = deterministic (runnable offline); [llm] = needs judge; [network] = hits net.
+fixtures:
+  # ── plan_well_formed (code) ────────────────────────────────────────────────
+  - id: plan_well_formed_pass
+    grader: scout.plan_well_formed
+    expected: pass
+    inputs:
+      plan: |
+        # Research Plan
+        ## Hypothesis
+        Attention head L9H6 in gpt2 mediates IOI via direct logit attribution.
+        ## Target model: GPT-2 Small (gpt2)
+        ## Experiment: run ablation and activation_patching on the IO token.
+
+  - id: plan_well_formed_fail
+    grader: scout.plan_well_formed
+    expected: fail
+    inputs:
+      plan: "TODO: figure out the research direction later."
+
+  # ── target_model_appropriate (code) ────────────────────────────────────────
+  - id: target_model_appropriate_pass
+    grader: scout.target_model_appropriate
+    expected: pass
+    inputs:
+      plan: "We will study the IOI circuit in GPT-2 Small."
+      expected_model_substrings: [gpt2, "gpt-2 small"]
+
+  - id: target_model_appropriate_fail
+    grader: scout.target_model_appropriate
+    expected: fail
+    inputs:
+      plan: "We will study the IOI circuit in Llama-3-8B."
+      expected_model_substrings: [gpt2, "gpt-2 small"]
+
+  # ── tools_called_properly (code) ───────────────────────────────────────────
+  - id: tools_called_properly_pass
+    grader: scout.tools_called_properly
+    expected: pass
+    inputs:
+      trajectory:
+        - {name: search_arxiv, args: {query: "indirect object identification"}}
+        - {name: search_web, args: {query: "IOI circuit gpt2"}}
+        - {name: save_research_plan, args: {plan: "..."}}
+
+  - id: tools_called_properly_fail
+    grader: scout.tools_called_properly
+    expected: fail
+    inputs:
+      trajectory:
+        - {name: search_arxiv, args: {query: "ioi"}}
+        - {name: teleport, args: null}          # unknown tool + non-dict args
+        - {name: nonexistent, args: "oops"}
+
+  # ── efficiency (code) ──────────────────────────────────────────────────────
+  - id: efficiency_pass
+    grader: scout.efficiency
+    expected: pass
+    inputs:
+      usage: {tool_calls: 6, tokens: 12000, wall_time: 40}
+      thresholds: {tool_calls: 20, tokens: 60000, wall_time: 180}
+
+  - id: efficiency_fail
+    grader: scout.efficiency
+    expected: fail
+    inputs:
+      usage: {tool_calls: 55, tokens: 200000, wall_time: 600}
+      thresholds: {tool_calls: 20, tokens: 60000, wall_time: 180}
+
+  # ── citations_exist (code, network) ────────────────────────────────────────
+  - id: citations_exist_pass
+    grader: scout.citations_exist
+    expected: pass
+    tags: [network]
+    note: "arXiv 2211.00593 is the real IOI paper (Wang et al.) — should resolve."
+    inputs:
+      plan: "Following Wang et al. (arXiv:2211.00593), we study name-mover heads."
+
+  - id: citations_exist_fail
+    grader: scout.citations_exist
+    expected: fail
+    tags: [network]
+    note: "Fabricated arXiv id — should not resolve."
+    inputs:
+      plan: "As shown in arXiv:9999.99999, GPT-2 has a dedicated IOI module."
+
+  # ── hypothesis_specificity (llm) ───────────────────────────────────────────
+  - id: hypothesis_specificity_pass
+    grader: scout.hypothesis_specificity
+    expected: pass
+    tags: [llm]
+    inputs:
+      plan: |
+        H1: Head L9H6 shows positive direct-logit attribution toward the IO token.
+        H2: Ablating L9H6 and L9H9 drops the IO-vs-S logit diff by >1.5.
+        H3: S-inhibition heads L7H3/L8H6 raise the logit diff when ablated.
+      reference_text: "IOI name-mover heads L9H6/L9H9 write the IO token; S-inhibition heads suppress the subject."
+
+  - id: hypothesis_specificity_fail
+    grader: scout.hypothesis_specificity
+    expected: fail
+    tags: [llm]
+    inputs:
+      plan: "We think some attention heads in the middle layers are probably involved in the task somehow."
+      reference_text: "IOI name-mover heads L9H6/L9H9 write the IO token."
+
+  # ── groundedness (llm) ─────────────────────────────────────────────────────
+  - id: groundedness_pass
+    grader: scout.groundedness
+    expected: pass
+    tags: [llm]
+    inputs:
+      plan: "We follow Wang et al.'s finding that L9H6 and L9H9 are the primary name-mover heads."
+      retrieved_context: "Wang et al. (2022) identify L9H6 and L9H9 as GPT-2 Small's primary name-mover heads in IOI."
+
+  - id: groundedness_fail
+    grader: scout.groundedness
+    expected: fail
+    tags: [llm]
+    inputs:
+      plan: "Prior work established that head L0H0 is the sole cause of IOI and that GPT-2 has 48 layers."
+      retrieved_context: "Wang et al. (2022) identify L9H6 and L9H9 as name-mover heads in GPT-2 Small (12 layers)."
+
+  # ── citations_support_hypothesis (llm) ─────────────────────────────────────
+  - id: citations_support_hypothesis_pass
+    grader: scout.citations_support_hypothesis
+    expected: pass
+    tags: [llm]
+    inputs:
+      plan: "Name-mover heads L9H6/L9H9 write the IO token (Wang et al., 2022, Interpretability in the Wild)."
+
+  - id: citations_support_hypothesis_fail
+    grader: scout.citations_support_hypothesis
+    expected: fail
+    tags: [llm]
+    note: >
+      Real paper, wrong claim: ROME is about MLP factual storage/editing and says
+      nothing about IOI attention heads. (Earlier draft mixed in a genuinely
+      ROME-supported claim and the judge correctly scored it 0.5 — indeterminate.)
+    inputs:
+      plan: |
+        H1: Ablating attention head L9H6 eliminates indirect-object identification
+        in GPT-2 Small (Meng et al., 2022, ROME).
+        H2: Attention heads L9H6 and L9H9 copy the indirect object's name to the
+        final position (Meng et al., 2022, ROME).
+
+  # ── search_triggering (llm) ────────────────────────────────────────────────
+  - id: search_triggering_pass
+    grader: scout.search_triggering
+    expected: pass
+    tags: [llm]
+    note: "Empirical, literature-dependent question AND Scout searched -> correct."
+    inputs:
+      question: "What does the most recent 2024 literature say about successor heads in Pythia models?"
+      searched: true
+
+  - id: search_triggering_fail
+    grader: scout.search_triggering
+    expected: fail
+    tags: [llm]
+    note: "Same kind of question but Scout did NOT search -> under-triggered."
+    inputs:
+      question: "What does the most recent 2024 literature say about successor heads in Pythia models?"
+      searched: false
+
+  # ── tool_capability_honesty (llm) ──────────────────────────────────────────
+  - id: tool_capability_honesty_pass
+    grader: scout.tool_capability_honesty
+    expected: pass
+    tags: [llm]
+    inputs:
+      plan: |
+        This question needs SAE feature search, which Lens does not currently provide.
+        We flag this gap; the available tools can only give an indirect, partial answer.
+      missing_capability: "SAE feature search"
+
+  - id: tool_capability_honesty_fail
+    grader: scout.tool_capability_honesty
+    expected: fail
+    tags: [llm]
+    inputs:
+      plan: "We will use direct_logit_attribution and ablation to find the SAE features for academic writing style."
+      missing_capability: "SAE feature search"
+
+  # ── researcher_would_run (human) ───────────────────────────────────────────
+  - id: researcher_would_run_na
+    grader: scout.researcher_would_run
+    expected: na
+    tags: []
+    note: "Human grader — always returns None (needs_human); no auto pass/fail case exists."
+    inputs:
+      plan: "# Research Plan\n## Hypothesis\nL9H6 mediates IOI..."
+      question: "What attention heads mediate IOI in GPT-2 Small?"

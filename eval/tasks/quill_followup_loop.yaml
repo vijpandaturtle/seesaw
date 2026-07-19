@@ -1,0 +1,32 @@
+task:
+  id: "quill_followup_loop_1"
+  desc: >
+    Loop-closure probe: given a bundle with an obvious missing experiment (DLA
+    only, no causal check), Quill's follow-up specs must be EXECUTABLE by Lens —
+    valid tool from the registry, concrete what_to_measure — and must address the
+    gap. The end-to-end test is whether the top-priority follow-up can be handed
+    straight back to Lens and run.
+  target: quill
+  input_bundle:
+    research_question: "What attention heads mediate indirect object identification in GPT-2 Small?"
+    model_name: gpt2
+    results:
+      - name: "Direct Logit Attribution — IOI"
+        tool: direct_logit_attribution
+        model_name: gpt2
+        prompts: ["When Mary and John went to the store, John gave a drink to"]
+        summary: "L9H6 and L9H9 show the strongest positive attribution toward the IO token."
+        data: {top_heads: [[L9H6, 4.1], [L9H9, 3.8]], baseline_ld: 3.36}
+        status: success
+  graders:
+    - type: state_check
+      expect:
+        critique_report: {saved: true, min_followups: 1}
+        followups: {tools_in_registry: true}    # every proposed tool must exist in Lens
+    - type: llm_rubric
+      rubric: rubrics/critique_gap_quality.md
+    - type: deterministic_tests
+      required: [test_followup_roundtrip_executes.py]   # literally run the top follow-up in Lens
+  tracked_metrics:
+    - type: transcript
+      metrics: [n_total_tokens]

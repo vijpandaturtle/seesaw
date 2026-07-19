@@ -1,0 +1,32 @@
+task:
+  id: "quill_weak_bundle_1"
+  desc: >
+    Calibration probe (weak side): feed Quill a deliberately weak bundle — one
+    logit_lens result, single prompt, vague summary, no causal tools. Quill must
+    assess it weak/moderate (NOT strong) and its gaps must name the real problem
+    (missing causal evidence), not invent unrelated critiques.
+  target: quill
+  input_bundle:
+    research_question: "What attention heads mediate indirect object identification in GPT-2 Small?"
+    model_name: gpt2
+    results:
+      - name: "Logit Lens — IOI"
+        tool: logit_lens
+        model_name: gpt2
+        prompts: ["When Mary and John went to the store, John gave a drink to"]
+        summary: >
+          The correct token becomes visible in the top-5 predictions by around
+          layer 9, suggesting the model resolves IOI somewhere in later layers.
+        data: {final_top_token: " Mary"}
+        status: success
+  graders:
+    - type: state_check
+      expect:
+        critique_report: {saved: true, overall_assessment_in: [weak, moderate]}
+    - type: llm_rubric
+      rubric: rubrics/critique_gap_quality.md
+  tracked_metrics:
+    - type: transcript
+      metrics: [n_total_tokens]
+    - type: latency
+      metrics: [time_to_last_token]

@@ -1,0 +1,27 @@
+task:
+  id: "copy_suppression_1"
+  desc: >
+    Investigate copy suppression in GPT-2 Small (McDougall et al., 2023): head
+    L10H7 suppresses naive copying of earlier tokens. The signal is NEGATIVE
+    direct-logit attribution — known-tricky ground truth (our earlier replication
+    saw L10H6 top the negative list; prompt construction matters).
+  question: "Which head in GPT-2 Small suppresses naive token copying, and how does it operate?"
+  model: gpt2
+  target: pipeline
+  graders:
+    - type: deterministic_tests
+      required: [test_copy_suppression_negative_head.py]
+    - type: llm_rubric
+      rubric: rubrics/causal_honesty.md
+      target: lens                       # negative-DLA evidence is correlational; summary must not overclaim
+    - type: state_check
+      expect:
+        research_plan: {saved: true}
+        experiment_bundle: {schema_valid: true}
+    - type: tool_calls
+      required:
+        - {tool: direct_logit_attribution}
+        - {tool: ablation}
+  tracked_metrics:
+    - type: transcript
+      metrics: [n_turns, n_toolcalls, n_total_tokens]

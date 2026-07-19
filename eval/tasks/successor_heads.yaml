@@ -1,0 +1,26 @@
+task:
+  id: "successor_heads_1"
+  desc: >
+    Identify successor heads in GPT-2 Small (Gould et al., 2023) — heads that
+    increment ordinal sequences (days, months, numbers). The distinguishing check
+    is CROSS-TYPE consistency: the same heads must top the attribution across
+    different sequence types, not just one.
+  question: "Does GPT-2 Small have successor heads that increment across different ordinal sequence types?"
+  model: gpt2
+  target: pipeline
+  graders:
+    - type: deterministic_tests
+      required: [test_successor_cross_type_overlap.py]
+    - type: llm_rubric
+      rubric: rubrics/hypothesis_specificity.md
+      target: scout
+    - type: state_check
+      expect:
+        research_plan: {saved: true}
+        experiment_bundle: {schema_valid: true, min_successful_results: 3}   # >=3 sequence types
+    - type: tool_calls
+      required:
+        - {tool: direct_logit_attribution}
+  tracked_metrics:
+    - type: transcript
+      metrics: [n_turns, n_toolcalls, n_total_tokens]

@@ -1,0 +1,23 @@
+task:
+  id: "induction_heads_1"
+  desc: >
+    Find induction heads in GPT-2 Small using repeated random-token sequences
+    (Olsson et al., 2022). The signature is attention from the second occurrence
+    of a token to the position AFTER its first occurrence.
+  question: "Which heads in GPT-2 Small implement induction (in-context copying of repeated sequences)?"
+  model: gpt2
+  target: pipeline
+  graders:
+    - type: deterministic_tests
+      required: [test_induction_attention_signature.py]
+    - type: state_check
+      expect:
+        research_plan: {saved: true}
+        experiment_bundle: {schema_valid: true}
+        prompts: {repeated_sequence: true}     # must construct repeated-token prompts
+    - type: tool_calls
+      required:
+        - {tool: attention_pattern}            # the definitional tool for this circuit
+  tracked_metrics:
+    - type: transcript
+      metrics: [n_turns, n_toolcalls, n_total_tokens]

@@ -1,0 +1,29 @@
+task:
+  id: "factual_recall_rome_1"
+  desc: >
+    Localize factual-association storage in GPT-2 XL (Meng et al., 2022, ROME):
+    mid-layer MLPs at the subject token, shown via activation patching. HEAVY —
+    gpt2-xl is a ~6GB download and slow on CPU; run this task on GPU or accept
+    long wall-times. Also checks the plan picks gpt2-xl, not gpt2 (model-choice
+    failure caught by state_check + the target-model grader).
+  question: "Where does GPT-2 XL store the factual association 'The Eiffel Tower is located in Paris'?"
+  model: gpt2-xl
+  target: pipeline
+  graders:
+    - type: deterministic_tests
+      required: [test_rome_midlayer_mlp_patching.py]
+    - type: llm_rubric
+      rubric: rubrics/hypothesis_specificity.md
+      target: scout
+    - type: state_check
+      expect:
+        research_plan: {saved: true, target_model: gpt2-xl}
+        experiment_bundle: {schema_valid: true}
+    - type: tool_calls
+      required:
+        - {tool: activation_patching}          # the definitional ROME method
+  tracked_metrics:
+    - type: transcript
+      metrics: [n_turns, n_toolcalls, n_total_tokens]
+    - type: latency
+      metrics: [time_to_last_token, wall_time]  # the interesting number on this heavy task

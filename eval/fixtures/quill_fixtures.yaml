@@ -1,0 +1,212 @@
+# Quill grader-validation fixtures. Balanced pass/fail per grader.
+# CritiqueReport / ExperimentBundle shapes mirror quill/mcp_server/src/models/schemas.py.
+fixtures:
+  # ── calibration (code) ─────────────────────────────────────────────────────
+  - id: calibration_pass
+    grader: quill.calibration
+    expected: pass
+    inputs:
+      report: {overall_assessment: strong}
+      expected_assessment: strong
+
+  - id: calibration_fail
+    grader: quill.calibration
+    expected: fail
+    note: "Called a strong run weak — ordinal distance 2, score 0."
+    inputs:
+      report: {overall_assessment: weak}
+      expected_assessment: strong
+
+  # ── false_positive_rate (code) ─────────────────────────────────────────────
+  - id: false_positive_rate_pass
+    grader: quill.false_positive_rate
+    expected: pass
+    note: "Good bundle, Quill raised no gaps -> score 1.0."
+    inputs:
+      report: {overall_assessment: strong, gaps: []}
+
+  - id: false_positive_rate_fail
+    grader: quill.false_positive_rate
+    expected: fail
+    note: "Invented 2 serious gaps on a good run -> 1/(1+2)=0.33."
+    inputs:
+      report:
+        overall_assessment: weak
+        gaps:
+          - {description: "no baseline reported", severity: critical}
+          - {description: "wrong model used", severity: important}
+
+  # ── followup_executable (code) ─────────────────────────────────────────────
+  - id: followup_executable_pass
+    grader: quill.followup_executable
+    expected: pass
+    inputs:
+      report:
+        followups:
+          - {name: "ablate L9H6", tool: ablation, what_to_measure: "logit-diff drop", hypothesis: "L9H6 is causal", priority: high}
+          - {name: "patch subject", tool: activation_patching, what_to_measure: "recovery", hypothesis: "signal at subject", priority: medium}
+
+  - id: followup_executable_fail
+    grader: quill.followup_executable
+    expected: fail
+    note: "Follow-up names a tool that isn't in the Lens registry."
+    inputs:
+      report:
+        followups:
+          - {name: "run SAE", tool: sae_feature_search, what_to_measure: "features", hypothesis: "x", priority: high}
+
+  # ── stability (code) ───────────────────────────────────────────────────────
+  - id: stability_pass
+    grader: quill.stability
+    expected: pass
+    inputs:
+      assessments: [strong, strong, strong, strong]
+
+  - id: stability_fail
+    grader: quill.stability
+    expected: fail
+    note: "Same bundle, three different verdicts -> modal agreement 0.33."
+    inputs:
+      assessments: [strong, weak, moderate]
+
+  # ── gap_precision (llm) ────────────────────────────────────────────────────
+  - id: gap_precision_pass
+    grader: quill.gap_precision
+    expected: pass
+    tags: [llm]
+    inputs:
+      report:
+        gaps:
+          - {description: "Only correlational tools (logit_lens) were used; no causal evidence.", severity: critical}
+      bundle:
+        research_question: "What heads mediate IOI in GPT-2?"
+        model_name: gpt2
+        results:
+          - {tool: logit_lens, name: "Logit Lens", summary: "IO token appears in top-5 by layer 9."}
+
+  - id: gap_precision_fail
+    grader: quill.gap_precision
+    expected: fail
+    tags: [llm]
+    note: "The flagged gap is hallucinated — the bundle DID use causal tools."
+    inputs:
+      report:
+        gaps:
+          - {description: "No causal tools were used at all.", severity: critical}
+      bundle:
+        research_question: "What heads mediate IOI in GPT-2?"
+        model_name: gpt2
+        results:
+          - {tool: ablation, name: "Ablation", summary: "Ablating L9H6 drops logit diff 41%."}
+          - {tool: activation_patching, name: "Patching", summary: "Subject-token patching recovers 0.7."}
+
+  # ── gap_recall (llm) ───────────────────────────────────────────────────────
+  - id: gap_recall_pass
+    grader: quill.gap_recall
+    expected: pass
+    tags: [llm]
+    inputs:
+      report:
+        gaps:
+          - {description: "No causal tool was used — only DLA (correlational).", severity: critical}
+          - {description: "Only one prompt tested; no robustness across name pairs.", severity: important}
+      planted_flaws:
+        - "No causal experiment (ablation/activation_patching) was run."
+        - "Only a single prompt was tested, so robustness is unknown."
+
+  - id: gap_recall_fail
+    grader: quill.gap_recall
+    expected: fail
+    tags: [llm]
+    note: "Quill's gap misses both planted flaws."
+    inputs:
+      report:
+        gaps:
+          - {description: "The plots could use nicer color scales.", severity: minor}
+      planted_flaws:
+        - "No causal experiment (ablation/activation_patching) was run."
+        - "Only a single prompt was tested, so robustness is unknown."
+
+  # ── false_positives_spurious (llm) ─────────────────────────────────────────
+  - id: false_positives_spurious_pass
+    grader: quill.false_positives_spurious
+    expected: pass
+    tags: [llm]
+    note: "Gaps raised are all genuine methodological concerns."
+    inputs:
+      report:
+        gaps:
+          - {description: "No control prompt was tested to confirm the effect is IOI-specific.", severity: important}
+
+  - id: false_positives_spurious_fail
+    grader: quill.false_positives_spurious
+    expected: fail
+    tags: [llm]
+    note: "Gaps are manufactured / trivial on a strong run."
+    inputs:
+      report:
+        gaps:
+          - {description: "The experiment did not also test GPT-4, Claude, and Gemini.", severity: critical}
+          - {description: "The researcher did not cite enough papers from before 1990.", severity: critical}
+
+  # ── followup_relevant (llm) ────────────────────────────────────────────────
+  - id: followup_relevant_pass
+    grader: quill.followup_relevant
+    expected: pass
+    tags: [llm]
+    inputs:
+      report:
+        gaps:
+          - {description: "No causal evidence — only DLA was run.", severity: critical}
+        followups:
+          - {name: "ablate name-movers", tool: ablation, rationale: "supply the missing causal evidence", what_to_measure: "logit-diff drop when L9H6/L9H9 ablated"}
+
+  - id: followup_relevant_fail
+    grader: quill.followup_relevant
+    expected: fail
+    tags: [llm]
+    note: "Follow-up is unrelated to the identified gap."
+    inputs:
+      report:
+        gaps:
+          - {description: "No causal evidence — only DLA was run.", severity: critical}
+        followups:
+          - {name: "prettier plots", tool: logit_lens, rationale: "improve the figure aesthetics", what_to_measure: "color palette"}
+
+  # ── statistical_validity (llm) ─────────────────────────────────────────────
+  - id: statistical_validity_pass
+    grader: quill.statistical_validity
+    expected: pass
+    tags: [llm]
+    inputs:
+      bundle:
+        research_question: "What heads mediate IOI in GPT-2?"
+        model_name: gpt2
+        results:
+          - {tool: ablation, name: "Ablation", summary: "Baseline vs mean-ablated across 10 name pairs; control (neutral prompt) near zero."}
+          - {tool: activation_patching, name: "Patching", summary: "Clean/corrupted patching with recovery baseline; effect holds across variations."}
+
+  - id: statistical_validity_fail
+    grader: quill.statistical_validity
+    expected: fail
+    tags: [llm]
+    note: "No baseline, no control, single prompt, sweeping claim."
+    inputs:
+      bundle:
+        research_question: "What heads mediate IOI in GPT-2?"
+        model_name: gpt2
+        results:
+          - {tool: logit_lens, name: "Logit Lens", summary: "On one sentence the IO token showed up, so L9H6 clearly controls all of IOI."}
+
+  # ── matches_expert (human) ─────────────────────────────────────────────────
+  - id: matches_expert_na
+    grader: quill.matches_expert
+    expected: na
+    tags: []
+    note: "Human grader — always returns None (needs_human); no auto pass/fail case."
+    inputs:
+      report: {overall_assessment: moderate, gaps: [{description: "no control prompt", severity: important}]}
+      bundle:
+        research_question: "What heads mediate IOI in GPT-2?"
+        model_name: gpt2
+        results: [{tool: ablation, name: "Ablation", summary: "L9H6 ablation drops logit diff."}]

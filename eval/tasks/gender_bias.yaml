@@ -1,0 +1,29 @@
+task:
+  id: "gender_bias_1"
+  desc: >
+    Locate the components mediating occupation-based gender bias in GPT-2 Small
+    (" she" vs " he" logit diff after occupation prompts). Must include neutral
+    control prompts — testing only "does bias appear" is a one-sided eval.
+  question: "Which attention heads mediate occupation-based gender bias in GPT-2 Small?"
+  model: gpt2
+  target: pipeline
+  graders:
+    - type: deterministic_tests
+      required:
+        - test_gender_bias_direction.py       # biased prompts: expected direction, pass@k/pass^k
+        - test_gender_bias_controls.py         # neutral prompts: near-zero logit diff
+    - type: llm_rubric
+      rubric: rubrics/hypothesis_specificity.md
+      target: scout
+    - type: state_check
+      expect:
+        research_plan: {saved: true}
+        experiment_bundle: {schema_valid: true}
+        control_prompts: {present: true}       # the plan/bundle must include controls
+    - type: tool_calls
+      required:
+        - {tool: direct_logit_attribution}
+        - {tool: ablation}
+  tracked_metrics:
+    - type: transcript
+      metrics: [n_turns, n_toolcalls, n_total_tokens]

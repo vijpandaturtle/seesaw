@@ -1,0 +1,24 @@
+task:
+  id: "docstring_circuit_1"
+  desc: >
+    Trace the docstring circuit in the 4-layer attention-only model (Heimersheim &
+    Janiak, 2023): predicting the next argument name in a Python docstring. Also a
+    model-loading probe — attn-only-4l must load via TransformerLens; a plan that
+    defaults to gpt2 fails model choice.
+  question: "What circuit predicts the next argument name in a Python docstring in the 4-layer attention-only model?"
+  model: attn-only-4l
+  target: pipeline
+  graders:
+    - type: deterministic_tests
+      required: [test_docstring_argument_heads.py]
+    - type: state_check
+      expect:
+        research_plan: {saved: true, target_model: attn-only-4l}
+        experiment_bundle: {schema_valid: true}
+    - type: tool_calls
+      required:
+        - {tool: attention_pattern}
+        - {tool: ablation}
+  tracked_metrics:
+    - type: transcript
+      metrics: [n_turns, n_toolcalls, n_total_tokens]
