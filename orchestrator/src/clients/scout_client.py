@@ -1,5 +1,6 @@
 """Client for the Scout research-planning agent."""
 
+import time
 from pathlib import Path
 
 from scout.mcp_server.src.app.agent import build_agent
@@ -8,7 +9,6 @@ from scout.mcp_server.src.config.settings import OUTPUTS_DIR
 
 def run_scout(
     research_question: str,
-    plan_filename: str = "research_plan.md",
     thread_id: str = "scout-1",
     verbose: bool = True,
 ) -> Path:
@@ -18,9 +18,14 @@ def run_scout(
     to write the plan to disk. This function streams the agent until
     that tool call completes, then returns the plan path.
 
+    Scout's LLM picks its own descriptive filename when saving (e.g.
+    "gender_bias_attention_heads_research_plan.md", not always the
+    literal "research_plan.md"), so instead of checking a fixed name,
+    this looks for the newest "*research_plan*.md" file written to
+    OUTPUTS_DIR during this run.
+
     Args:
         research_question: The mech interp question to research.
-        plan_filename: Filename for the saved plan (under scout/outputs/).
         thread_id: LangGraph thread ID for checkpointing.
         verbose: Print agent messages as they stream.
 
@@ -30,8 +35,9 @@ def run_scout(
     Raises:
         RuntimeError: If Scout finishes without saving a plan.
     """
-    agent  = build_agent()
-    config = {"configurable": {"thread_id": thread_id}}
+    agent      = build_agent()
+    config     = {"configurable": {"thread_id": thread_id}}
+    start_time = time.time()
 
     print(f"🔍 Scout starting — question: {research_question!r}")
 
@@ -48,12 +54,16 @@ def run_scout(
             if isinstance(last.content, str):
                 print(last.content[:500])
 
-    plan_path = OUTPUTS_DIR / plan_filename
-    if not plan_path.exists():
+    candidates = [
+        p for p in OUTPUTS_DIR.glob("*research_plan*.md")
+        if p.stat().st_mtime >= start_time
+    ]
+    if not candidates:
         raise RuntimeError(
-            f"Scout completed but no plan found at {plan_path}. "
+            f"Scout completed but no *research_plan*.md file appeared in {OUTPUTS_DIR}. "
             "Check that save_research_plan was called."
         )
 
+    plan_path = max(candidates, key=lambda p: p.stat().st_mtime)
     print(f"✅ Scout done — plan saved to {plan_path}")
     return plan_path
