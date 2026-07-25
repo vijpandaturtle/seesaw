@@ -211,3 +211,9 @@ __marimo__/
 
 # macOS
 .DS_Store
+
+# Seesaw run artifacts (research plans, bundles, critiques, eval runs)
+outputs/
+
+# Local Claude Code config (machine-specific paths)
+.claude/

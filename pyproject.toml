@@ -5,17 +5,14 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "seesaw"
 version = "0.1.0"
-description = "Seesaw: mechanistic interpretability tools for multimodal models"
+description = "A multi-agent framework for automated mechanistic interpretability research"
 readme = "README.md"
-requires-python = ">=3.9"
+requires-python = ">=3.10"
+license = { text = "Apache-2.0" }
+keywords = ["mechanistic-interpretability", "agents", "transformer-lens", "langgraph", "mcp"]
 
+# Core: Scout + Quill + orchestrator + eval loaders (no torch — see extras).
 dependencies = [
-    "torch",
-    "numpy",
-    "Pillow",
-    "matplotlib",
-    "scikit-learn",
-    "torchvision",
     "python-dotenv",
     "langchain-core",
     "langchain-anthropic",
@@ -25,13 +22,41 @@ dependencies = [
     "fastmcp",
     "mcp",
     "langchain-mcp-adapters",
-    "transformer-lens",
-    "sae-lens",
-    "streamlit",
+    "pyyaml",
+    "pydantic",
 ]
 
+[project.optional-dependencies]
+# Lens's TransformerLens experiment tools (the GPU-adjacent stack)
+experiments = [
+    "torch",
+    "numpy",
+    "matplotlib",
+    "transformer-lens",
+    "sae-lens",
+]
+# LangSmith experiment tracking for the eval suite
+eval = [
+    "langsmith",
+    "pytest",
+]
+# Streamlit review UI
+ui = [
+    "streamlit",
+    "pandas",
+]
+all = ["seesaw[experiments,eval,ui]"]
+
+[project.scripts]
+seesaw = "seesaw.cli:main"
+
+[project.urls]
+Repository = "https://github.com/vijpandaturtle/seesaw"
+
 [tool.setuptools]
-package-dir = {"" = "."}
+package-dir = { "" = "." }
 
 [tool.setuptools.packages.find]
 where = ["."]
+include = ["seesaw*", "scout*", "lens*", "quill*", "orchestrator*", "shared*", "eval*"]
+exclude = ["*outputs*", "*__pycache__*"]
