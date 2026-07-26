@@ -28,6 +28,7 @@ class LensState(TypedDict):
     research_question: str
     experiment_queue:  list[dict]
     model_name:        str
+    token_defaults:    dict      # question-level positive/negative tokens
     last_result:       dict | None
     followup_count:    int
     results:           list[dict]

@@ -1,5 +1,5 @@
 from ..models.schemas import ParsedPlanModel
-from ..tools import TOOL_REGISTRY, tool_kwargs_guide
+from ..tools import TOOL_REGISTRY, token_defaults_from_specs, tool_kwargs_guide
 from ..utils import make_llm
 
 
@@ -27,11 +27,15 @@ def parse_plan(state: dict) -> dict:
     )
     parsed = structured_llm.invoke(prompt)
     queue  = [e.model_dump() for e in parsed.experiments]
+    tokens = token_defaults_from_specs(queue)
     print(f"   Found {len(queue)} experiments: {[e['name'] for e in queue]}")
+    if tokens:
+        print(f"   Token pair: {tokens['positive_tokens']} vs {tokens['negative_tokens']}")
     return {
         "research_question": parsed.research_question,
         "model_name":        parsed.model_name,
         "experiment_queue":  queue,
+        "token_defaults":    tokens,
         "results":           [],
         "followup_count":    0,
         "last_result":       None,

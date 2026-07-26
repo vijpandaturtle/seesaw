@@ -34,9 +34,11 @@ def run_experiment(state: dict) -> dict:
             f"Tool '{spec['tool']}' not in registry: {list(TOOL_REGISTRY.keys())}"
         )
     else:
-        kwargs, missing = normalize_tool_kwargs(
+        kwargs, missing, dropped = normalize_tool_kwargs(
             spec["tool"], spec.get("tool_kwargs", {}), len(spec["prompts"])
         )
+        if dropped:
+            print(f"   ⚠️  {spec['tool']} doesn't accept {dropped} — ignoring")
         if missing:
             result = failure(
                 f"Experiment spec for '{spec['tool']}' is missing required "

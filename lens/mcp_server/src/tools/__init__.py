@@ -76,7 +76,7 @@ def tool_kwargs_guide() -> str:
 
 def normalize_tool_kwargs(
     tool_name: str, kwargs: dict, n_prompts: int
-) -> tuple[dict, list[str]]:
+) -> tuple[dict, list[str], list[str]]:
     """Coerce LLM-produced tool_kwargs into what the tool actually accepts.
 
     Renames known aliases, broadcasts a single token pair across all prompts
@@ -90,14 +90,19 @@ def normalize_tool_kwargs(
         n_prompts: How many prompts the experiment runs on.
 
     Returns:
-        (cleaned kwargs, names of required arguments still missing).
+        (cleaned kwargs, required arguments still missing, arguments dropped).
+        Dropped names are reported so an unsupported request — asking ablation
+        to target specific heads, say — is visible rather than silent.
     """
     accepted = set(inspect.signature(TOOL_REGISTRY[tool_name]).parameters)
     out: dict = {}
+    dropped: list[str] = []
     for key, value in (kwargs or {}).items():
-        key = KWARG_ALIASES.get(key, key)
-        if key in accepted and key not in _NODE_SUPPLIED:
-            out[key] = value
+        canonical = KWARG_ALIASES.get(key, key)
+        if canonical in accepted and canonical not in _NODE_SUPPLIED:
+            out[canonical] = value
+        else:
+            dropped.append(key)
 
     for arg in _TOKEN_ARGS:
         value = out.get(arg)
@@ -109,7 +114,23 @@ def normalize_tool_kwargs(
             out[arg] = value
 
     missing = [a for a in required_tool_kwargs(tool_name) if a not in out]
-    return out, missing
+    return out, missing, dropped
+
+
+def token_defaults_from_specs(specs: list[dict]) -> dict:
+    """Pull the question-level token pair out of a parsed plan.
+
+    positive_tokens/negative_tokens describe the behaviour under study, not
+    one experiment, so the first spec that names them supplies the default
+    for follow-ups whose own kwargs omit them.
+    """
+    for spec in specs:
+        kwargs = {
+            KWARG_ALIASES.get(k, k): v for k, v in (spec.get("tool_kwargs") or {}).items()
+        }
+        if all(a in kwargs for a in _TOKEN_ARGS):
+            return {a: kwargs[a] for a in _TOKEN_ARGS}
+    return {}
 
 
 __all__ = [
@@ -124,4 +145,5 @@ __all__ = [
     "required_tool_kwargs",
     "tool_kwargs_guide",
     "normalize_tool_kwargs",
+    "token_defaults_from_specs",
 ]
