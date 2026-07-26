@@ -1,5 +1,5 @@
 from ..models.schemas import ParsedPlanModel
-from ..tools import TOOL_REGISTRY
+from ..tools import TOOL_REGISTRY, tool_kwargs_guide
 from ..utils import make_llm
 
 
@@ -14,8 +14,14 @@ def parse_plan(state: dict) -> dict:
     prompt = (
         f"Extract the experiments from this Research Plan.\n"
         f"For each experiment, extract the tool name, model, prompts, and what to measure.\n"
-        f"Only include experiments whose tool is one of: {list(TOOL_REGISTRY.keys())}.\n"
-        f"For tools that need io_tokens and subject_tokens, include them in tool_kwargs.\n"
+        f"Only include experiments whose tool is one of: {list(TOOL_REGISTRY.keys())}.\n\n"
+        f"Each tool takes `model` and `prompts` automatically. Anything else goes in\n"
+        f"tool_kwargs, using exactly these argument names — an experiment whose\n"
+        f"tool_kwargs are missing or misnamed cannot run:\n"
+        f"{tool_kwargs_guide()}\n\n"
+        f"Give one positive/negative token per prompt, in the same order as prompts\n"
+        f"(a single pair is applied to every prompt). Token strings need their leading\n"
+        f"space, e.g. ' Mary' not 'Mary'.\n"
         f"If no specific prompts are given, generate 2-3 appropriate IOI-style prompts.\n\n"
         f"Research Plan:\n{state['research_plan']}"
     )
