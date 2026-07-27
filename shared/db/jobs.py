@@ -53,7 +53,20 @@ ACTIVE_STATUSES = (QUEUED, RUNNING)
 _COLUMNS = (
     "question", "model", "status", "stage", "auto_approve",
     "plan_path", "bundle_path", "report_path", "error", "pid", "updated_at",
+    "cancel_requested", "worker_id", "log_tail",
 )
+
+# Added after the first release; connect() backfills them on open so an
+# existing jobs.db keeps working.
+_ADDED_COLUMNS = {
+    "cancel_requested": "INTEGER NOT NULL DEFAULT 0",
+    "worker_id":        "TEXT",
+    "log_tail":         "TEXT",
+}
+
+# How much worker output to mirror into the row. A frontend on another host
+# can't read the log file, so this is what it shows instead.
+LOG_TAIL_LINES = 200
 
 
 # ── Record ───────────────────────────────────────────────────────────────────
@@ -72,6 +85,9 @@ class Job:
     pid: int | None
     created_at: float
     updated_at: float
+    cancel_requested: int = 0
+    worker_id: str | None = None
+    log_tail: str | None = None
 
     @classmethod
     def from_row(cls, row: sqlite3.Row) -> "Job":
@@ -126,6 +142,10 @@ def connect() -> sqlite3.Connection:
         )
         """
     )
+    existing = {r["name"] for r in conn.execute("PRAGMA table_info(jobs)")}
+    for column, spec in _ADDED_COLUMNS.items():
+        if column not in existing:
+            conn.execute(f"ALTER TABLE jobs ADD COLUMN {column} {spec}")
     conn.commit()
     return conn
 
@@ -214,14 +234,68 @@ def approve(job_id: str) -> None:
     update(job_id, status=QUEUED, error=None)
 
 
-def cancel(job_id: str) -> None:
-    """Mark a job cancelled and stop its worker if one is running."""
+def claim(job_id: str, worker_id: str) -> Job | None:
+    """Take ownership of a queued job, atomically.
+
+    The UPDATE only matches while the row is still queued, so when several
+    workers poll at once exactly one sees a row change and the rest get None.
+    This is what replaces spawn_worker once the process that creates jobs is
+    no longer the process that runs them.
+
+    Returns:
+        The claimed Job, or None if another worker got there first.
+    """
+    with connect() as conn:
+        cur = conn.execute(
+            "UPDATE jobs SET status = ?, worker_id = ?, error = NULL, updated_at = ?"
+            " WHERE id = ? AND status = ?",
+            (RUNNING, worker_id, time.time(), job_id, QUEUED),
+        )
+        if cur.rowcount == 0:
+            return None
+    return get(job_id)
+
+
+def claim_next(worker_id: str) -> Job | None:
+    """Claim the oldest queued job, or None if there is nothing to run."""
+    with connect() as conn:
+        rows = conn.execute(
+            "SELECT id FROM jobs WHERE status = ? ORDER BY created_at", (QUEUED,)
+        ).fetchall()
+    for row in rows:
+        job = claim(row["id"], worker_id)
+        if job is not None:
+            return job
+    return None
+
+
+def request_cancel(job_id: str) -> None:
+    """Ask a job to stop.
+
+    Sets a flag the worker checks between stages, because the worker may be
+    on a different host than whoever clicked cancel. A local worker is also
+    signalled directly so an idle job stops immediately.
+    """
     job = get(job_id)
+    update(job_id, cancel_requested=1)
     if job and job.pid:
         try:
             os.kill(job.pid, signal.SIGTERM)
-        except (ProcessLookupError, PermissionError):
-            pass          # already gone, or owned by another user
+        except (ProcessLookupError, PermissionError, OSError):
+            pass          # gone, not ours, or on another machine entirely
+    if job and not job.is_active:
+        update(job_id, status=CANCELLED, pid=None)
+
+
+def cancel_requested(job_id: str) -> bool:
+    """Whether someone asked this job to stop (read by the worker)."""
+    job = get(job_id)
+    return bool(job and job.cancel_requested)
+
+
+def cancel(job_id: str) -> None:
+    """Stop a job now and mark it cancelled."""
+    request_cancel(job_id)
     update(job_id, status=CANCELLED, pid=None)
 
 
@@ -245,7 +319,30 @@ def spawn_worker(job_id: str) -> int:
 
 
 def tail_log(job_id: str, n_lines: int = 60) -> str:
+    """Recent worker output.
+
+    Prefers the log file, which only exists on the machine that ran the job.
+    A frontend deployed away from the workers falls back to the copy the
+    worker mirrored into the row.
+    """
+    path = LOGS_DIR / f"{job_id}.log"
+    if path.exists():
+        return "\n".join(path.read_text(errors="replace").splitlines()[-n_lines:])
+    job = get(job_id)
+    if job and job.log_tail:
+        return "\n".join(job.log_tail.splitlines()[-n_lines:])
+    return ""
+
+
+def sync_log(job_id: str, n_lines: int = LOG_TAIL_LINES) -> None:
+    """Mirror the tail of the local log file into the job row.
+
+    Called by the worker at stage boundaries so anyone reading the store from
+    another host sees progress. Cheap enough to call often; the row holds
+    only the last n_lines.
+    """
     path = LOGS_DIR / f"{job_id}.log"
     if not path.exists():
-        return ""
-    return "\n".join(path.read_text(errors="replace").splitlines()[-n_lines:])
+        return
+    tail = "\n".join(path.read_text(errors="replace").splitlines()[-n_lines:])
+    update(job_id, log_tail=tail)

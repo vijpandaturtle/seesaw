@@ -19,7 +19,10 @@ log file — see shared/db/jobs.spawn_worker.
 
 from __future__ import annotations
 
+import os
+import socket
 import sys
+import time
 import traceback
 
 from dotenv import load_dotenv
@@ -80,26 +83,30 @@ STAGE_FNS = {
 
 
 # ── Driver ───────────────────────────────────────────────────────────────────
-def run_job(job_id: str) -> int:
+def run_job(job_id: str, worker_id: str | None = None) -> int:
     """Run queued stages for this job until it blocks, finishes, or fails.
 
     Returns:
         Process exit code — 0 unless a stage raised.
     """
+    worker_id = worker_id or f"pid-{os.getpid()}"
     while True:
-        job = jobs.get(job_id)
+        job = jobs.claim(job_id, worker_id)
         if job is None:
-            print(f"job {job_id} not found", file=sys.stderr)
-            return 1
-        if job.status != jobs.QUEUED:
-            # Nothing to claim: awaiting approval, cancelled, done, or another
-            # worker already took it.
-            print(f"job {job_id} is {job.status} at stage {job.stage} — nothing to run")
+            current = jobs.get(job_id)
+            if current is None:
+                print(f"job {job_id} not found", file=sys.stderr)
+                return 1
+            # Awaiting approval, cancelled, done, or another worker got it.
+            print(f"job {job_id} is {current.status} at stage {current.stage} — nothing to run")
             return 0
 
-        jobs.update(job.id, status=jobs.RUNNING, error=None)
-        print(f"\n▶ stage: {job.stage}")
+        if jobs.cancel_requested(job_id):
+            print("job cancelled before stage started")
+            jobs.update(job_id, status=jobs.CANCELLED, pid=None)
+            return 0
 
+        print(f"\n▶ stage: {job.stage}")
         try:
             STAGE_FNS[job.stage](job)
         except Exception as exc:                     # noqa: BLE001 — reported to the UI
@@ -107,30 +114,60 @@ def run_job(job_id: str) -> int:
             jobs.update(job.id, status=jobs.FAILED,
                         error=f"{job.stage}: {type(exc).__name__}: {exc}"[:1000],
                         pid=None)
+            jobs.sync_log(job_id)
             return 1
 
         # Re-read: the stage wrote artifact paths, and the user may have
-        # cancelled while it ran.
+        # asked to cancel while it ran.
         job = jobs.get(job_id)
-        if job is None or job.status == jobs.CANCELLED:
+        if job is None or job.status == jobs.CANCELLED or job.cancel_requested:
             print("job cancelled during stage")
+            jobs.update(job_id, status=jobs.CANCELLED, pid=None)
+            jobs.sync_log(job_id)
             return 0
 
         jobs.advance(job)
         after = jobs.get(job_id)
         print(f"✔ stage complete — now {after.status} at {after.stage}")
+        jobs.sync_log(job_id)
 
         if after.status != jobs.QUEUED:
             jobs.update(job_id, pid=None)
             return 0
 
 
+def poll(worker_id: str | None = None, interval: float = 5.0) -> int:
+    """Claim and run queued jobs forever.
+
+    This is the backend's entry point once the frontend is deployed somewhere
+    that can't spawn processes: Streamlit inserts a queued row, this loop
+    picks it up. Safe to run several of these — claims are atomic, so two
+    pollers never take the same job.
+    """
+    worker_id = worker_id or f"{socket.gethostname()}-{os.getpid()}"
+    print(f"👷 poller {worker_id} started — checking every {interval}s")
+    while True:
+        job = jobs.claim_next(worker_id)
+        if job is None:
+            time.sleep(interval)
+            continue
+        print(f"\n📥 claimed job {job.id} at stage {job.stage}: {job.question[:60]}")
+        try:
+            run_job(job.id, worker_id=worker_id)
+        except Exception:                            # noqa: BLE001 — keep polling
+            traceback.print_exc()
+
+
 def main() -> int:
     load_dotenv()
-    if len(sys.argv) != 2:
-        print(__doc__.strip().splitlines()[2], file=sys.stderr)
+    args = sys.argv[1:]
+    if args == ["--poll"]:
+        return poll()
+    if len(args) != 1:
+        print("usage: python -m orchestrator.src.worker <job_id> | --poll",
+              file=sys.stderr)
         return 2
-    return run_job(sys.argv[1])
+    return run_job(args[0])
 
 
 if __name__ == "__main__":
