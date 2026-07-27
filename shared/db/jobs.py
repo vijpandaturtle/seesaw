@@ -269,6 +269,21 @@ def claim_next(worker_id: str) -> Job | None:
     return None
 
 
+def next_queued_id() -> str | None:
+    """Oldest queued job id, without taking it.
+
+    For pollers: claiming here and then calling run_job would double-claim,
+    and run_job's own claim — the one that makes concurrent workers safe —
+    only matches rows still queued. Peek, then let run_job do the claiming.
+    """
+    with connect() as conn:
+        row = conn.execute(
+            "SELECT id FROM jobs WHERE status = ? ORDER BY created_at LIMIT 1",
+            (QUEUED,),
+        ).fetchone()
+    return row["id"] if row else None
+
+
 def request_cancel(job_id: str) -> None:
     """Ask a job to stop.
 

@@ -147,13 +147,16 @@ def poll(worker_id: str | None = None, interval: float = 5.0) -> int:
     worker_id = worker_id or f"{socket.gethostname()}-{os.getpid()}"
     print(f"👷 poller {worker_id} started — checking every {interval}s")
     while True:
-        job = jobs.claim_next(worker_id)
-        if job is None:
+        # Peek rather than claim: run_job does the atomic claim, and that's
+        # what decides the winner when several pollers see the same row.
+        job_id = jobs.next_queued_id()
+        if job_id is None:
             time.sleep(interval)
             continue
-        print(f"\n📥 claimed job {job.id} at stage {job.stage}: {job.question[:60]}")
+        job = jobs.get(job_id)
+        print(f"\n📥 picking up job {job_id} at stage {job.stage}: {job.question[:60]}")
         try:
-            run_job(job.id, worker_id=worker_id)
+            run_job(job_id, worker_id=worker_id)
         except Exception:                            # noqa: BLE001 — keep polling
             traceback.print_exc()
 
