@@ -1,20 +1,25 @@
-"""Run a research job's stages outside the UI process.
+"""Run a research job's stages.
 
-    python -m orchestrator.src.worker <job_id>
+    python -m orchestrator.src.worker <job_id>   one job, then exit
+    python -m orchestrator.src.worker --poll     claim queued jobs forever
 
-Streamlit reruns its script on every interaction and tears everything
-down when the browser disconnects, so pipeline stages can't live there —
-a Lens experiment outlives the page that launched it. This worker takes
-a job created by the UI, runs stages in order, and writes each artifact
-path back to the job store as it goes.
+A Lens experiment outlives the request that asked for it, so stages run
+here rather than in whatever created the job. The worker takes a job from
+the store, runs stages in order, and writes each artifact path back as it
+goes.
 
-With auto_approve off (the default), the worker runs one stage and exits,
-leaving the job parked at the next human gate; the dashboard's approve
-button queues the stage and spawns a fresh worker. With auto_approve on,
-a single worker runs all three stages back to back.
+With auto_approve off (the default), it runs one stage and exits, leaving
+the job parked at the next human gate; approving queues the stage again
+for a worker to claim. With auto_approve on, one worker runs all three
+stages back to back.
 
-Everything printed here (and by the agents themselves) lands in the job's
-log file — see shared/db/jobs.spawn_worker.
+--poll is the entry point when nothing starts workers on demand — the
+dashboard deployed away from the agents, for instance. Several pollers
+can run at once; claims are atomic, so no two take the same job.
+
+Everything printed here (and by the agents) goes to the job's log file
+under outputs/job_logs/, mirrored into the row by jobs.sync_log so a
+remote dashboard can read it.
 """
 
 from __future__ import annotations

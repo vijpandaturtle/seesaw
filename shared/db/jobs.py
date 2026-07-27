@@ -1,20 +1,22 @@
 """SQLite-backed store for research jobs.
 
 A *job* is one Scout → Lens → Quill run. Stages execute in a worker
-process (orchestrator/src/worker.py), not inside Streamlit — a Lens
-experiment easily outlives the page that started it, and Streamlit drops
-everything when the browser disconnects.
+process (orchestrator/src/worker.py), never inside whatever created the
+job — a Lens experiment easily outlives the request that asked for it.
 
-This store is the only shared state between the UI and the workers: the
-UI creates jobs and records approvals, workers claim stages and write
-back artifact paths. WAL mode handles the cross-process traffic, so
-there's no server to run.
+This store is the only shared state between the dashboard and the
+workers: the dashboard creates jobs and records approvals, workers claim
+stages and write back artifact paths. WAL mode handles the cross-process
+traffic, so there's no server to run.
 
     from shared.db import jobs
 
     job = jobs.create("What heads mediate IOI in GPT-2?", model="gpt2")
-    jobs.spawn_worker(job.id)
-    jobs.get(job.id).status        # running -> awaiting_approval -> ...
+    jobs.get(job.id).status        # queued -> running -> awaiting_approval
+
+Something has to pick the job up: `python -m orchestrator.src.worker
+--poll`, or the dashboard spawning a worker per job when it runs on the
+same host (see seesaw-web).
 
 `stage` always names the stage that is running or up next; `status` says
 what is happening to it. A job with stage="lens", status="awaiting_approval"
@@ -26,8 +28,6 @@ from __future__ import annotations
 import os
 import signal
 import sqlite3
-import subprocess
-import sys
 import time
 import uuid
 from dataclasses import dataclass
@@ -314,25 +314,7 @@ def cancel(job_id: str) -> None:
     update(job_id, status=CANCELLED, pid=None)
 
 
-# ── Worker process ───────────────────────────────────────────────────────────
-def spawn_worker(job_id: str) -> int:
-    """Start a detached worker for this job and return its pid.
-
-    stdout/stderr go to the job's log file, which is how the dashboard
-    shows agent progress — the agents print as they work.
-    """
-    LOGS_DIR.mkdir(parents=True, exist_ok=True)
-    log = (LOGS_DIR / f"{job_id}.log").open("a", buffering=1)
-    log.write(f"\n{'═' * 70}\n[{time.strftime('%Y-%m-%d %H:%M:%S')}] worker starting\n")
-    proc = subprocess.Popen(
-        [sys.executable, "-u", "-m", "orchestrator.src.worker", job_id],
-        cwd=REPO_ROOT, stdout=log, stderr=subprocess.STDOUT,
-        start_new_session=True,     # survives the Streamlit process
-    )
-    update(job_id, pid=proc.pid)
-    return proc.pid
-
-
+# ── Worker output ────────────────────────────────────────────────────────────
 def tail_log(job_id: str, n_lines: int = 60) -> str:
     """Recent worker output.
 

@@ -5,7 +5,8 @@
     seesaw critique <bundle.json>         Quill only: bundle -> critique report
     seesaw eval <task_id> | --list        Run an eval task against the live agents
     seesaw fixtures [--llm [AGENT]]       Grader meta-eval (offline free; --llm costs)
-    seesaw ui                             Launch the Streamlit review UI
+
+The dashboard is a separate project — see github.com/vijpandaturtle/seesaw-web.
 
 Every subcommand is a thin call into `import seesaw` / `seesaw.evals` — anything
 the CLI does, a script or notebook can do too.
@@ -81,13 +82,6 @@ def _cmd_fixtures(args) -> int:
     return 0 if not res["mismatches"] else 1
 
 
-def _cmd_ui(args) -> int:
-    import subprocess
-
-    app = Path(__file__).resolve().parents[1] / "ui" / "app.py"
-    return subprocess.call([sys.executable, "-m", "streamlit", "run", str(app)])
-
-
 def main() -> int:
     load_dotenv()
     parser = argparse.ArgumentParser(prog="seesaw", description=__doc__,
@@ -116,9 +110,6 @@ def main() -> int:
     p.add_argument("--llm", nargs="?", const="", metavar="AGENT",
                    help="run LLM fixtures (optionally one agent) — costs judge calls")
     p.set_defaults(fn=_cmd_fixtures)
-
-    p = sub.add_parser("ui", help="launch the Streamlit review UI")
-    p.set_defaults(fn=_cmd_ui)
 
     args = parser.parse_args()
     return args.fn(args)

@@ -40,12 +40,7 @@ eval = [
     "langsmith",
     "pytest",
 ]
-# Streamlit review UI
-ui = [
-    "streamlit",
-    "pandas",
-]
-all = ["seesaw[experiments,eval,ui]"]
+all = ["seesaw[experiments,eval]"]
 
 [project.scripts]
 seesaw = "seesaw.cli:main"

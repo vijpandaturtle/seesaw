@@ -282,7 +282,7 @@ python -m eval.runner quill_weak_bundle_1             # run one locally → outp
 python -m eval.runner.langsmith_runner --all-cheap    # run non-pipeline tasks as a LangSmith experiment
 ```
 
-The LangSmith runner registers every task as an example in the `seesaw-tasks` dataset, executes agents via `run_task`, and fans each grader result out as its own feedback score — so the experiment table shows one column per criterion, comparisons across experiments give per-criterion regressions, and `LANGSMITH_TRACING` nests the full agent trace under each row. Requires `LANGSMITH_API_KEY` in `.env`. A local Streamlit alternative (fixture health + persisted runs) is at `ui/pages/1_Eval_Dashboard.py`.
+The LangSmith runner registers every task as an example in the `seesaw-tasks` dataset, executes agents via `run_task`, and fans each grader result out as its own feedback score — so the experiment table shows one column per criterion, comparisons across experiments give per-criterion regressions, and `LANGSMITH_TRACING` nests the full agent trace under each row. Requires `LANGSMITH_API_KEY` in `.env`. Persisted runs are also readable straight from `outputs/eval_runs/*.json`.
 
 ### Adding to the suite
 
