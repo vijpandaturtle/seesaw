@@ -292,7 +292,7 @@ The LangSmith runner registers every task as an example in the `seesaw-tasks` da
 
 ### Known gaps
 
-- The `deterministic_tests` files referenced by the 8 pipeline tasks (`eval/tests/*.py`) are not yet written — the runner reports them as explicit errors until they exist.
+- The `deterministic_tests` files live in `eval/tests/`. They assert published findings (IOI name movers, ROME's mid-layer localisation, and so on) against the run's artifacts, and read those artifacts from environment variables the runner sets — so they can also be run directly with `SEESAW_EVAL_BUNDLE=<bundle.json> pytest eval/tests -q`.
 - Token usage (`n_total_tokens`) is captured for Scout but not Lens/Quill (their graphs are `invoke()`d; per-call usage is visible in LangSmith traces instead).
 - Human graders (`researcher_would_run`, `matches_expert`) export review payloads but no expert scores have been recorded yet.
 
