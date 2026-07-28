@@ -44,7 +44,11 @@ eval = [
 modal = [
     "modal",
 ]
-all = ["seesaw[experiments,eval,modal]"]
+# Hosted job store (set DATABASE_URL); SQLite needs nothing extra
+postgres = [
+    "psycopg[binary,pool]",
+]
+all = ["seesaw[experiments,eval,modal,postgres]"]
 
 [project.scripts]
 seesaw = "seesaw.cli:main"

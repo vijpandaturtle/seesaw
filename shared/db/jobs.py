@@ -1,4 +1,4 @@
-"""SQLite-backed store for research jobs.
+"""Store for research jobs, on SQLite or Postgres.
 
 A *job* is one Scout → Lens → Quill run. Stages execute in a worker
 process (orchestrator/src/worker.py), never inside whatever created the
@@ -6,8 +6,12 @@ job — a Lens experiment easily outlives the request that asked for it.
 
 This store is the only shared state between the dashboard and the
 workers: the dashboard creates jobs and records approvals, workers claim
-stages and write back artifact paths. WAL mode handles the cross-process
-traffic, so there's no server to run.
+stages and write back artifact paths.
+
+DATABASE_URL selects Postgres (needed once the dashboard and the workers
+are on different machines); without it the store is a local SQLite file,
+where WAL handles the cross-process traffic and there's no server to run.
+SEESAW_DB_PATH forces SQLite even when DATABASE_URL is set.
 
     from shared.db import jobs
 
@@ -25,7 +29,10 @@ has finished Scout and is waiting for a human to approve the plan.
 
 from __future__ import annotations
 
+import contextlib
 import os
+import re
+import threading
 import signal
 import sqlite3
 import time
@@ -115,39 +122,169 @@ def db_path() -> Path:
     return Path(os.environ.get("SEESAW_DB_PATH") or OUTPUTS_DIR / "jobs.db")
 
 
-def connect() -> sqlite3.Connection:
-    """Open a connection, creating the database and schema if needed."""
+def is_postgres() -> bool:
+    """Whether the store is backed by Postgres rather than a local file.
+
+    SEESAW_DB_PATH wins when both are set, so pointing at a file is always an
+    unambiguous way to get SQLite — tests rely on that, and it means an
+    exported DATABASE_URL can't silently redirect a local run at production.
+    """
+    if os.environ.get("SEESAW_DB_PATH"):
+        return False
+    return bool(os.environ.get("DATABASE_URL"))
+
+
+def _table() -> str:
+    """How to name the jobs table for the active backend.
+
+    Schema-qualified rather than selected with `SET search_path`, because a
+    pooled Postgres endpoint (Neon's `-pooler` host, PgBouncer in transaction
+    mode) multiplexes statements across backend connections: session state set
+    on one doesn't reliably apply to the next, so search_path silently stops
+    holding. Qualifying per statement is unaffected.
+    """
+    schema = os.environ.get("SEESAW_DB_SCHEMA")
+    return f'"{schema}".jobs' if schema and is_postgres() else "jobs"
+
+
+def _q(sql: str) -> str:
+    """Adapt a query written in SQLite style to the active backend."""
+    if not is_postgres():
+        return sql
+    sql = sql.replace("?", "%s")
+    table = _table()
+    return sql if table == "jobs" else re.sub(r"\bjobs\b", table, sql)
+
+
+def _ex(conn, sql: str, params: tuple = ()):
+    """Execute with backend-appropriate placeholders."""
+    return conn.execute(_q(sql), params)
+
+
+# Column types differ between the two; everything else about the schema is the
+# same, so the DDL is generated rather than duplicated.
+_BASE_COLUMNS = (
+    ("id", "TEXT PRIMARY KEY"),
+    ("question", "TEXT NOT NULL"),
+    ("model", "TEXT NOT NULL"),
+    ("status", "TEXT NOT NULL"),
+    ("stage", "TEXT NOT NULL"),
+    ("auto_approve", "INTEGER NOT NULL DEFAULT 0"),
+    ("plan_path", "TEXT"),
+    ("bundle_path", "TEXT"),
+    ("report_path", "TEXT"),
+    ("error", "TEXT"),
+    ("pid", "INTEGER"),
+    ("created_at", "{REAL} NOT NULL"),
+    ("updated_at", "{REAL} NOT NULL"),
+)
+
+
+def _create_table_sql(real_type: str) -> str:
+    cols = ",\n            ".join(
+        f"{name:13s} {spec.format(REAL=real_type)}" for name, spec in _BASE_COLUMNS
+    )
+    return f"CREATE TABLE IF NOT EXISTS jobs (\n            {cols}\n        )"
+
+
+# One pool per process. Opening a fresh TLS connection to a hosted Postgres
+# costs seconds, and the dashboard polls every few seconds, so connections are
+# reused rather than made per query.
+_pool = None
+_pool_key: str | None = None
+_pool_lock = threading.Lock()
+
+
+def _get_pool():
+    global _pool, _pool_key
+
+    from psycopg.rows import dict_row
+    from psycopg_pool import ConnectionPool
+
+    schema = os.environ.get("SEESAW_DB_SCHEMA") or ""
+    key = f"{os.environ['DATABASE_URL']}#{schema}"
+    if _pool is not None and _pool_key == key:
+        return _pool
+
+    # Workers claim jobs from several threads at once, so building the pool
+    # has to be serialised: unguarded, two threads each build one and the
+    # second closes the pool the first handed out, leaving queries running
+    # against a closed connection.
+    with _pool_lock:
+        if _pool is not None and _pool_key == key:
+            return _pool
+        previous = _pool
+
+        pool = ConnectionPool(
+            os.environ["DATABASE_URL"],
+            min_size=1,
+            max_size=10,
+            # autocommit removes a BEGIN/COMMIT round trip per call. Every
+            # operation here is a single statement — including the claim,
+            # whose atomicity comes from the UPDATE's WHERE clause rather than
+            # from a transaction — so there is nothing multi-statement to
+            # protect.
+            kwargs={"row_factory": dict_row, "autocommit": True},
+            open=True,
+        )
+        # Schema setup runs once per pool, not once per query — it's four DDL
+        # round-trips, which is most of the cost of opening a connection.
+        with pool.connection() as conn:
+            if schema:
+                conn.execute(f'CREATE SCHEMA IF NOT EXISTS "{schema}"')
+            conn.execute(_q(_create_table_sql("DOUBLE PRECISION")))
+            for column, spec in _ADDED_COLUMNS.items():
+                conn.execute(
+                    _q(f"ALTER TABLE jobs ADD COLUMN IF NOT EXISTS {column} {spec}")
+                )
+
+        _pool, _pool_key = pool, key
+
+    if previous is not None:
+        previous.close()
+    return pool
+
+
+_sqlite_ready: set[str] = set()
+
+
+def _connect_sqlite() -> sqlite3.Connection:
     path = db_path()
     path.parent.mkdir(parents=True, exist_ok=True)
     conn = sqlite3.connect(path, timeout=30.0)
     conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA journal_mode=WAL")
     conn.execute("PRAGMA busy_timeout=30000")
-    conn.execute(
-        """
-        CREATE TABLE IF NOT EXISTS jobs (
-            id           TEXT PRIMARY KEY,
-            question     TEXT NOT NULL,
-            model        TEXT NOT NULL,
-            status       TEXT NOT NULL,
-            stage        TEXT NOT NULL,
-            auto_approve INTEGER NOT NULL DEFAULT 0,
-            plan_path    TEXT,
-            bundle_path  TEXT,
-            report_path  TEXT,
-            error        TEXT,
-            pid          INTEGER,
-            created_at   REAL NOT NULL,
-            updated_at   REAL NOT NULL
-        )
-        """
-    )
-    existing = {r["name"] for r in conn.execute("PRAGMA table_info(jobs)")}
-    for column, spec in _ADDED_COLUMNS.items():
-        if column not in existing:
-            conn.execute(f"ALTER TABLE jobs ADD COLUMN {column} {spec}")
-    conn.commit()
+    if str(path) not in _sqlite_ready:
+        conn.execute(_create_table_sql("REAL"))
+        # SQLite has no ADD COLUMN IF NOT EXISTS, so columns are checked first.
+        existing = {r["name"] for r in conn.execute("PRAGMA table_info(jobs)")}
+        for column, spec in _ADDED_COLUMNS.items():
+            if column not in existing:
+                conn.execute(f"ALTER TABLE jobs ADD COLUMN {column} {spec}")
+        conn.commit()
+        _sqlite_ready.add(str(path))
     return conn
+
+
+@contextlib.contextmanager
+def connect():
+    """A connection with the schema in place, as a context manager.
+
+    The only place either driver is named — everything else goes through _ex,
+    so switching backends doesn't touch the queries. Postgres connections come
+    from a pool and are returned to it on exit; SQLite ones are closed.
+    """
+    if is_postgres():
+        with _get_pool().connection() as conn:
+            yield conn
+    else:
+        conn = _connect_sqlite()
+        try:
+            with conn:
+                yield conn
+        finally:
+            conn.close()
 
 
 # ── CRUD ─────────────────────────────────────────────────────────────────────
@@ -171,7 +308,8 @@ def create(question: str, model: str = "gpt2", auto_approve: bool = False) -> Jo
         pid=None, created_at=now, updated_at=now,
     )
     with connect() as conn:
-        conn.execute(
+        _ex(
+            conn,
             "INSERT INTO jobs (id, question, model, status, stage, auto_approve,"
             " created_at, updated_at) VALUES (?,?,?,?,?,?,?,?)",
             (job.id, job.question, job.model, job.status, job.stage,
@@ -182,15 +320,15 @@ def create(question: str, model: str = "gpt2", auto_approve: bool = False) -> Jo
 
 def get(job_id: str) -> Job | None:
     with connect() as conn:
-        row = conn.execute("SELECT * FROM jobs WHERE id = ?", (job_id,)).fetchone()
+        row = _ex(conn, "SELECT * FROM jobs WHERE id = ?", (job_id,)).fetchone()
     return Job.from_row(row) if row else None
 
 
 def list_jobs(limit: int = 100) -> list[Job]:
     """Newest first."""
     with connect() as conn:
-        rows = conn.execute(
-            "SELECT * FROM jobs ORDER BY created_at DESC LIMIT ?", (limit,)
+        rows = _ex(
+            conn, "SELECT * FROM jobs ORDER BY created_at DESC LIMIT ?", (limit,)
         ).fetchall()
     return [Job.from_row(r) for r in rows]
 
@@ -204,14 +342,14 @@ def update(job_id: str, **fields) -> None:
     fields["updated_at"] = time.time()
     assignments = ", ".join(f"{k} = ?" for k in fields)
     with connect() as conn:
-        conn.execute(f"UPDATE jobs SET {assignments} WHERE id = ?",
-                     (*fields.values(), job_id))
+        _ex(conn, f"UPDATE jobs SET {assignments} WHERE id = ?",
+            (*fields.values(), job_id))
 
 
 def delete(job_id: str) -> None:
     """Drop the job record. Artifacts on disk are left alone."""
     with connect() as conn:
-        conn.execute("DELETE FROM jobs WHERE id = ?", (job_id,))
+        _ex(conn, "DELETE FROM jobs WHERE id = ?", (job_id,))
 
 
 # ── Stage transitions ────────────────────────────────────────────────────────
@@ -246,7 +384,8 @@ def claim(job_id: str, worker_id: str) -> Job | None:
         The claimed Job, or None if another worker got there first.
     """
     with connect() as conn:
-        cur = conn.execute(
+        cur = _ex(
+            conn,
             "UPDATE jobs SET status = ?, worker_id = ?, error = NULL, updated_at = ?"
             " WHERE id = ? AND status = ?",
             (RUNNING, worker_id, time.time(), job_id, QUEUED),
@@ -259,8 +398,8 @@ def claim(job_id: str, worker_id: str) -> Job | None:
 def claim_next(worker_id: str) -> Job | None:
     """Claim the oldest queued job, or None if there is nothing to run."""
     with connect() as conn:
-        rows = conn.execute(
-            "SELECT id FROM jobs WHERE status = ? ORDER BY created_at", (QUEUED,)
+        rows = _ex(
+            conn, "SELECT id FROM jobs WHERE status = ? ORDER BY created_at", (QUEUED,)
         ).fetchall()
     for row in rows:
         job = claim(row["id"], worker_id)
@@ -277,7 +416,8 @@ def next_queued_id() -> str | None:
     only matches rows still queued. Peek, then let run_job do the claiming.
     """
     with connect() as conn:
-        row = conn.execute(
+        row = _ex(
+            conn,
             "SELECT id FROM jobs WHERE status = ? ORDER BY created_at LIMIT 1",
             (QUEUED,),
         ).fetchone()
