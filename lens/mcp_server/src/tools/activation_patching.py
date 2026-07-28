@@ -7,7 +7,12 @@ from transformer_lens import HookedTransformer
 
 matplotlib.use("Agg")
 
-from ..app.helpers import get_logit_diff, tokens_to_ids
+from ..app.helpers import (
+    get_logit_diff,
+    row_logit_diffs,
+    sweep_chunks,
+    tokens_to_ids,
+)
 from ..models.schemas import ExperimentResult
 from ..config import PLOTS_DIR
 
@@ -52,31 +57,51 @@ def run_activation_patching(
         f"  Clean LD: {clean_ld:.3f}  |  Corrupt LD: {corrupt_ld:.3f}  |  Delta: {total_diff:.3f}"
     )
 
-    # Cache clean activations
+    # Only resid_post is patched, so cache nothing else — an unfiltered cache
+    # holds every hook point at every layer, which is what runs a large model
+    # out of memory before the sweep begins.
     with torch.no_grad():
-        _, clean_cache = model.run_with_cache(clean_tokens)
+        _, clean_cache = model.run_with_cache(
+            clean_tokens, names_filter=lambda name: name.endswith("hook_resid_post")
+        )
 
     patch_effects = torch.zeros(n_layers, seq_len)
+    n_prompts = corrupt_tokens.shape[0]
 
+    # Positions within a layer are independent patches of the same corrupted
+    # prompts, so they go in one batch: the prompts are tiled once per position
+    # and each slice has a different position patched from the clean run.
     for layer in range(n_layers):
         clean_resid_layer = clean_cache["resid_post", layer]   # [batch, seq, d_model]
+        hook_name = f"blocks.{layer}.hook_resid_post"
 
-        for pos in range(seq_len):
-            clean_act = clean_resid_layer[:, pos:pos + 1, :].clone()
+        for start, stop in sweep_chunks(seq_len, n_prompts):
+            positions = torch.arange(start, stop)
+            batch = corrupt_tokens.repeat(len(positions), 1)   # position-major
+            rows = torch.arange(batch.shape[0])
+            pos_of_row = positions.to(batch.device)[rows // n_prompts]
+            prompt_of_row = rows % n_prompts
+            # [rows, d_model] — the clean activation each row patches in.
+            clean_act = clean_resid_layer[prompt_of_row, pos_of_row, :].clone()
 
-            def hook_fn(value, hook, ca=clean_act, p=pos):
+            def hook_fn(value, hook, r=rows, p=pos_of_row, ca=clean_act):
                 value = value.clone()
-                value[:, p:p + 1, :] = ca
+                value[r, p, :] = ca
                 return value
 
-            hook_name = f"blocks.{layer}.hook_resid_post"
             with torch.no_grad():
                 with model.hooks(fwd_hooks=[(hook_name, hook_fn)]):
-                    patched_ld = get_logit_diff(model, corrupt_tokens, io_ids, s_ids)
+                    logits = model(batch)
+
+            diffs = row_logit_diffs(logits, io_ids, s_ids, n_prompts)
+            patched_ld = diffs.view(len(positions), n_prompts).mean(dim=1)
 
             # Normalised recovery: 0 = no recovery, 1 = full recovery
             if abs(total_diff) > 1e-6:
-                patch_effects[layer, pos] = (patched_ld - corrupt_ld) / total_diff
+                patch_effects[layer, start:stop] = (
+                    (patched_ld.cpu() - corrupt_ld) / total_diff
+                )
+            del logits
 
         if layer % 3 == 0:
             print(f"  Layer {layer}/{n_layers - 1} done")

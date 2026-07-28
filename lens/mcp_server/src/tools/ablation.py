@@ -8,7 +8,12 @@ from transformer_lens import HookedTransformer
 
 matplotlib.use("Agg")
 
-from ..app.helpers import get_logit_diff, tokens_to_ids
+from ..app.helpers import (
+    get_logit_diff,
+    row_logit_diffs,
+    sweep_chunks,
+    tokens_to_ids,
+)
 from ..models.schemas import ExperimentResult
 from ..config import PLOTS_DIR
 
@@ -49,38 +54,58 @@ def run_ablation(
     baseline_ld = get_logit_diff(model, tokens, io_ids, s_ids)
     print(f"  Baseline logit diff: {baseline_ld:.4f}")
 
-    # Precompute mean z activations for mean ablation
+    # Precompute mean z activations for mean ablation. Only hook_z is read, so
+    # caching anything else is wasted memory — on a large model with a long
+    # prompt the attention patterns alone are what exhaust it.
     mean_z: dict[int, torch.Tensor] = {}
     if ablation_type == "mean":
         with torch.no_grad():
-            _, cache = model.run_with_cache(tokens)
+            _, cache = model.run_with_cache(
+                tokens, names_filter=lambda name: name.endswith("hook_z")
+            )
         for layer in range(n_layers):
             # Mean over batch and seq → [1, 1, n_heads, d_head]
             mean_z[layer] = cache["z", layer].mean(dim=[0, 1], keepdim=True)
+        del cache
 
     ablation_effects = torch.zeros(n_layers, n_heads)
+    n_prompts = tokens.shape[0]
 
+    # Heads within a layer are independent interventions on the same prompts,
+    # so they go in one batch instead of one forward pass each: the prompts are
+    # tiled once per head and each slice has a different head ablated.
     for layer in range(n_layers):
-        for head in range(n_heads):
+        hook_name = f"blocks.{layer}.attn.hook_z"
+
+        for start, stop in sweep_chunks(n_heads, n_prompts):
+            heads = torch.arange(start, stop)
+            batch = tokens.repeat(len(heads), 1)          # head-major rows
+            rows = torch.arange(batch.shape[0])
+            head_of_row = heads.to(batch.device)[rows // n_prompts]
+
             if ablation_type == "zero":
-                def hook_fn(value, hook, h=head):
+                def hook_fn(value, hook, r=rows, h=head_of_row):
                     value = value.clone()
-                    value[:, :, h, :] = 0.0
+                    value[r, :, h, :] = 0.0
                     return value
             else:
-                mz = mean_z[layer][:, :, head, :]   # [1, 1, d_head]
+                # [len(heads), d_head] → one replacement vector per row,
+                # broadcast across the sequence.
+                replacement = mean_z[layer][0, 0][head_of_row].unsqueeze(1)
 
-                def hook_fn(value, hook, h=head, mz=mz):
+                def hook_fn(value, hook, r=rows, h=head_of_row, rep=replacement):
                     value = value.clone()
-                    value[:, :, h, :] = mz
+                    value[r, :, h, :] = rep
                     return value
 
-            hook_name = f"blocks.{layer}.attn.hook_z"
             with torch.no_grad():
                 with model.hooks(fwd_hooks=[(hook_name, hook_fn)]):
-                    ablated_ld = get_logit_diff(model, tokens, io_ids, s_ids)
+                    logits = model(batch)
 
-            ablation_effects[layer, head] = baseline_ld - ablated_ld
+            diffs = row_logit_diffs(logits, io_ids, s_ids, n_prompts)
+            ablated_ld = diffs.view(len(heads), n_prompts).mean(dim=1)
+            ablation_effects[layer, start:stop] = baseline_ld - ablated_ld.cpu()
+            del logits
 
         if layer % 3 == 0:
             print(f"  Layer {layer}/{n_layers - 1} done")
