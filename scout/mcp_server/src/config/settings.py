@@ -11,8 +11,14 @@ FIRECRAWL_API_KEY: str | None = os.getenv("FIRECRAWL_API_KEY")
 
 # ── Paths ─────────────────────────────────────────────────────────────────────
 SCOUT_ROOT: Path = Path(__file__).resolve().parents[4]  # scout/
-OUTPUTS_DIR: Path = SCOUT_ROOT / "outputs"
-OUTPUTS_DIR.mkdir(exist_ok=True)
+# SEESAW_ARTIFACTS_DIR redirects output to shared storage. Running on
+# Modal, the container filesystem is discarded when the function ends,
+# so artifacts have to land on a mounted volume to outlive the run.
+_ARTIFACTS_BASE = os.getenv("SEESAW_ARTIFACTS_DIR")
+OUTPUTS_DIR: Path = (
+    Path(_ARTIFACTS_BASE) / "scout" if _ARTIFACTS_BASE else SCOUT_ROOT / "outputs"
+)
+OUTPUTS_DIR.mkdir(parents=True, exist_ok=True)
 
 # ── Model ─────────────────────────────────────────────────────────────────────
 SCOUT_MODEL: str = "claude-opus-4-5"
