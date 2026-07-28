@@ -40,7 +40,11 @@ eval = [
     "langsmith",
     "pytest",
 ]
-all = ["seesaw[experiments,eval]"]
+# Running Lens experiments on Modal instead of in-process
+modal = [
+    "modal",
+]
+all = ["seesaw[experiments,eval,modal]"]
 
 [project.scripts]
 seesaw = "seesaw.cli:main"

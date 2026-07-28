@@ -1,4 +1,5 @@
 from ..app.model_session import get_model
+from ..app.remote import is_remote, run_experiment_remote
 from ..app.sandbox import run_in_sandbox
 from ..models.schemas import ExperimentResult
 from ..tools import TOOL_REGISTRY, normalize_tool_kwargs
@@ -33,6 +34,11 @@ def run_experiment(state: dict) -> dict:
         result = failure(
             f"Tool '{spec['tool']}' not in registry: {list(TOOL_REGISTRY.keys())}"
         )
+    elif is_remote():
+        # Modal validates the spec on its side and returns plot bytes, which
+        # run_experiment_remote writes into the usual PLOTS_DIR.
+        print("   ↗ running on Modal")
+        result = run_experiment_remote(spec)
     else:
         kwargs, missing, dropped = normalize_tool_kwargs(
             spec["tool"], spec.get("tool_kwargs", {}), len(spec["prompts"])
