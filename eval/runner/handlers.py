@@ -9,8 +9,11 @@ error/needs_human result — visible in the TaskResult, not swallowed.
 from __future__ import annotations
 
 import fnmatch
+import json
+import os
 import subprocess
 import sys
+import tempfile
 from pathlib import Path
 
 from ..graders import GraderResult, GraderType, field as read
@@ -32,26 +35,57 @@ def _res(criterion: str, agent: str, kind: GraderType, **kw) -> GraderResult:
 
 
 # ── deterministic_tests ──────────────────────────────────────────────────────
+def _artifact_env(run: AgentRun, scratch: Path) -> dict:
+    """Environment for a test subprocess, pointing at this run's artifacts.
+
+    The tests assert published findings against what the agents actually
+    produced, so they need the bundle. It may only exist in memory (a canned
+    quill run, say), so it's written out here and the path passed along —
+    eval/tests/conftest.py reads these.
+    """
+    env = dict(os.environ)
+    if run.bundle is not None:
+        bundle_path = scratch / "bundle.json"
+        bundle_path.write_text(json.dumps(run.bundle, default=str))
+        env["SEESAW_EVAL_BUNDLE"] = str(bundle_path)
+    elif run.bundle_path:
+        env["SEESAW_EVAL_BUNDLE"] = str(run.bundle_path)
+
+    if run.plan_path:
+        env["SEESAW_EVAL_PLAN"] = str(run.plan_path)
+    elif run.plan_text:
+        plan_path = scratch / "plan.md"
+        plan_path.write_text(run.plan_text)
+        env["SEESAW_EVAL_PLAN"] = str(plan_path)
+
+    if run.report_path:
+        env["SEESAW_EVAL_REPORT"] = str(run.report_path)
+    env["SEESAW_EVAL_MODEL"] = run.bundle.get("model_name", "") if run.bundle else ""
+    return env
+
+
 def handle_deterministic_tests(spec: GraderSpec, task: Task, run: AgentRun) -> list[GraderResult]:
     out = []
-    for test_file in spec.config["required"]:
-        path = TESTS_DIR / test_file
-        crit = f"deterministic_tests.{Path(test_file).stem}"
-        if not path.exists():
-            out.append(_res(crit, task.target or "pipeline", GraderType.CODE, score=None,
-                            error=f"test file not found: {path}",
-                            detail="referenced test not implemented yet"))
-            continue
-        proc = subprocess.run(
-            [sys.executable, "-m", "pytest", str(path), "-x", "-q",
-             "--no-header", "-p", "no:cacheprovider"],
-            capture_output=True, text=True, cwd=REPO_ROOT, timeout=1800,
-        )
-        tail = (proc.stdout or proc.stderr).strip().splitlines()[-1] if (proc.stdout or proc.stderr) else ""
-        out.append(_res(crit, task.target or "pipeline", GraderType.CODE,
-                        score=1.0 if proc.returncode == 0 else 0.0,
-                        metrics={"returncode": proc.returncode},
-                        detail=tail[:200]))
+    with tempfile.TemporaryDirectory(prefix="seesaw-eval-") as tmp:
+        env = _artifact_env(run, Path(tmp))
+        for test_file in spec.config["required"]:
+            path = TESTS_DIR / test_file
+            crit = f"deterministic_tests.{Path(test_file).stem}"
+            if not path.exists():
+                out.append(_res(crit, task.target or "pipeline", GraderType.CODE, score=None,
+                                error=f"test file not found: {path}",
+                                detail="referenced test not implemented yet"))
+                continue
+            proc = subprocess.run(
+                [sys.executable, "-m", "pytest", str(path), "-x", "-q",
+                 "--no-header", "-p", "no:cacheprovider"],
+                capture_output=True, text=True, cwd=REPO_ROOT, timeout=1800, env=env,
+            )
+            tail = (proc.stdout or proc.stderr).strip().splitlines()[-1] if (proc.stdout or proc.stderr) else ""
+            out.append(_res(crit, task.target or "pipeline", GraderType.CODE,
+                            score=1.0 if proc.returncode == 0 else 0.0,
+                            metrics={"returncode": proc.returncode},
+                            detail=tail[:200]))
     return out
 
 
