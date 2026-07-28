@@ -15,7 +15,9 @@ the CLI does, a script or notebook can do too.
 from __future__ import annotations
 
 import argparse
+import json
 import sys
+import time
 from pathlib import Path
 
 from dotenv import load_dotenv
@@ -51,6 +53,18 @@ def _cmd_eval(args) -> int:
     if args.list or not args.task_id:
         for tid, t in sorted(tasks.items()):
             print(f"{tid:30s} target={t.target or '-':9s} {len(t.graders)} graders")
+        if args.json:
+            _write_json(args.json, {
+                "tasks": [
+                    {
+                        "id": t.id,
+                        "target": t.target or "pipeline",
+                        "question": t.question,
+                        "graders": [g.type for g in t.graders],
+                    }
+                    for t in sorted(tasks.values(), key=lambda t: t.id)
+                ],
+            })
         return 0
     if args.task_id not in tasks:
         print(f"unknown task {args.task_id!r}; try `seesaw eval --list`", file=sys.stderr)
@@ -79,7 +93,22 @@ def _cmd_fixtures(args) -> int:
           f"{len(res['mismatches'])} mismatches")
     for m in res["mismatches"]:
         print(f"  ❌ {m}")
+    if args.json:
+        _write_json(args.json, {**res, "checked_at": time.time()})
     return 0 if not res["mismatches"] else 1
+
+
+def _write_json(path: str, payload: dict) -> None:
+    """Dump a result for the dashboard to read.
+
+    The eval suite runs in Python and the dashboard is a separate TypeScript
+    app, so anything it needs to show has to be written out here rather than
+    computed on demand.
+    """
+    out = Path(path)
+    out.parent.mkdir(parents=True, exist_ok=True)
+    out.write_text(json.dumps(payload, indent=2, default=str))
+    print(f"wrote {out}")
 
 
 def main() -> int:
@@ -104,11 +133,13 @@ def main() -> int:
     p = sub.add_parser("eval", help="run an eval task against the live agents")
     p.add_argument("task_id", nargs="?")
     p.add_argument("--list", action="store_true")
+    p.add_argument("--json", metavar="PATH", help="write the task catalog for the dashboard")
     p.set_defaults(fn=_cmd_eval)
 
     p = sub.add_parser("fixtures", help="grader meta-eval")
     p.add_argument("--llm", nargs="?", const="", metavar="AGENT",
                    help="run LLM fixtures (optionally one agent) — costs judge calls")
+    p.add_argument("--json", metavar="PATH", help="write fixture health for the dashboard")
     p.set_defaults(fn=_cmd_fixtures)
 
     args = parser.parse_args()
