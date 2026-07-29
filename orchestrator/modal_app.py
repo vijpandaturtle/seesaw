@@ -25,6 +25,19 @@ ARTIFACTS_DIR = "/artifacts"
 
 image = (
     modal.Image.debian_slim(python_version="3.12")
+    # Lens's graph runs here even though its experiments don't: run_experiment
+    # imports TOOL_REGISTRY, and reading a tool's signature means importing the
+    # module, which imports torch and matplotlib. CPU wheels only — the actual
+    # forward passes happen on the GPU app, so this never touches a device.
+    .pip_install(
+        "torch",
+        index_url="https://download.pytorch.org/whl/cpu",
+    )
+    .pip_install(
+        "numpy",
+        "matplotlib",
+        "transformer-lens",
+    )
     .pip_install(
         "python-dotenv",
         "pydantic",

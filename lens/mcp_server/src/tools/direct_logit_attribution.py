@@ -48,15 +48,24 @@ def run_direct_logit_attribution(
     io_ids = tokens_to_ids(model, positive_tokens)
     s_ids  = tokens_to_ids(model, negative_tokens)
 
-    # Build IO - Subject direction in vocab space, then detach to avoid requires_grad
-    logit_diff_dir = torch.zeros(model.cfg.d_model)
+    # Build IO - Subject direction in vocab space, then detach to avoid requires_grad.
+    # On the model's device: W_U lives there, and a CPU accumulator would fail
+    # with "expected all tensors to be on the same device" the moment this runs
+    # on a GPU — invisible on a CPU-only machine.
+    logit_diff_dir = torch.zeros(model.cfg.d_model, device=W_U.device, dtype=W_U.dtype)
     for io_id, s_id in zip(io_ids, s_ids):
         logit_diff_dir += W_U[:, io_id] - W_U[:, s_id]
     logit_diff_dir = logit_diff_dir.detach() / len(io_ids)   # detach: W_U is a Parameter
 
     with torch.no_grad():
-        _, cache = model.run_with_cache(tokens)
+        # Only z and mlp_out are read; caching everything else is wasted memory.
+        _, cache = model.run_with_cache(
+            tokens,
+            names_filter=lambda name: name.endswith(("hook_z", "hook_mlp_out")),
+        )
 
+    # Results stay on CPU — they're small, and everything downstream (plotting,
+    # tolist(), the bundle) wants them there.
     head_attrs = torch.zeros(n_layers, n_heads)
     mlp_attrs  = torch.zeros(n_layers)
 
@@ -67,12 +76,12 @@ def run_direct_logit_attribution(
         W_O      = model.W_O[layer]
         head_out = torch.einsum("bshd,hdm->bshm", z, W_O)   # [B, S, H, d_model]
 
-        for h in range(n_heads):
-            h_vec = head_out[:, pos, h, :].mean(0)           # [d_model], mean over batch
-            head_attrs[layer, h] = h_vec @ logit_diff_dir
+        # All heads at once, and back to CPU for storage.
+        h_vecs = head_out[:, pos, :, :].mean(0)              # [n_heads, d_model]
+        head_attrs[layer] = (h_vecs @ logit_diff_dir).cpu()
 
         mlp_out = cache["mlp_out", layer][:, pos, :].mean(0)
-        mlp_attrs[layer] = mlp_out @ logit_diff_dir
+        mlp_attrs[layer] = (mlp_out @ logit_diff_dir).cpu()
 
     # ── Plot ──────────────────────────────────────────────────────────────────
     fig, axes = plt.subplots(1, 2, figsize=(16, 5))
