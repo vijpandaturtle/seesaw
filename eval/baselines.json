@@ -1,0 +1,12 @@
+{
+  "quill_strong_bundle_1": {
+    "llm_rubric.critique_gap_quality": 0.8,
+    "state_check.critique_report.overall_assessment_in": 0.0,
+    "state_check.critique_report.saved": 1.0
+  },
+  "quill_weak_bundle_1": {
+    "llm_rubric.critique_gap_quality": 1.0,
+    "state_check.critique_report.overall_assessment_in": 1.0,
+    "state_check.critique_report.saved": 1.0
+  }
+}

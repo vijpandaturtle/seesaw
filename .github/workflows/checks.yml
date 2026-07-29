@@ -1,0 +1,70 @@
+# Tier 1: everything that costs nothing to run.
+#
+# No agents, no API calls, no model weights — so this can run on every push
+# without thinking about it. What it catches: a broken grader, a store that
+# stops honouring exactly-once claiming, a task file that no longer parses.
+name: checks
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  checks:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+
+      - name: Install
+        run: |
+          uv venv --python 3.12
+          # No [experiments]: torch isn't needed for anything in this tier.
+          uv pip install -e '.[eval,postgres]'
+
+      - name: Job store spec
+        # Postgres is exercised only when a database is configured; the fixture
+        # skips that half otherwise, so a fork without secrets still runs the
+        # SQLite half rather than failing.
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+        run: uv run pytest tests/ -q
+
+      - name: Grader meta-eval
+        # The offline fixtures: canned inputs with known verdicts, run through
+        # every grader. A mismatch means a grader or a fixture label is wrong,
+        # which would silently corrupt every task score downstream.
+        run: uv run seesaw fixtures
+
+      - name: Task catalog parses
+        run: uv run seesaw eval --list
+
+      - name: Deterministic tests are wired up
+        # Each task names the test files its deterministic_tests grader runs.
+        # A referenced file that doesn't exist reports as an error at eval time
+        # rather than a failure, so it's easy to miss — this makes it loud.
+        run: |
+          uv run python - <<'PY'
+          from pathlib import Path
+          from eval.tasks import load_all
+
+          missing = [
+              (task.id, name)
+              for task in load_all().values()
+              for grader in task.graders
+              if grader.type == "deterministic_tests"
+              for name in grader.config["required"]
+              if not (Path("eval/tests") / name).exists()
+          ]
+          if missing:
+              for task_id, name in missing:
+                  print(f"{task_id}: eval/tests/{name} does not exist")
+              raise SystemExit(1)
+          print("every referenced test file exists")
+          PY
