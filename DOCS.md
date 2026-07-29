@@ -40,6 +40,9 @@ Set in `.env` (see `.env.example`):
 |---|---|---|
 | `ANTHROPIC_API_KEY` | Yes | All three agents (Claude for reasoning/critique) |
 | `FIRECRAWL_API_KEY` | No | Scout's `search_web` and `scrape_url` tools. Without it, those two tools no-op; `search_arxiv` still works. |
+| `DATABASE_URL` | No | Job store. Unset means a local SQLite file, which is all local development needs. |
+
+Deployment adds several more — see [Deployment → Environment reference](#environment-reference).
 
 ---
 
@@ -300,48 +303,171 @@ The LangSmith runner registers every task as an example in the `seesaw-tasks` da
 
 ## Deployment
 
-Seesaw currently has no deployed/hosted component — everything runs locally via the CLI or as MCP servers over stdio. There is no HTTP server, no database, and no persisted state beyond the JSON/Markdown files each agent writes to its own `outputs/` directory.
+Seesaw runs across three services. Nothing is always-on: the dashboard is
+serverless and the agents are spawned per stage, so both scale to zero between
+jobs.
+
+| Service | Runs | Why there |
+|---|---|---|
+| **Vercel** | The dashboard (`seesaw-web`) | Reads and writes the job store; never executes an agent |
+| **Modal** | Scout, Quill, Lens's graph, and the five experiment tools | A stage takes minutes to an hour, well past any serverless request limit |
+| **Neon** | The job store | Vercel and Modal are different machines, so a local SQLite file can't be shared |
+
+The dashboard inserts a queued row and calls Modal's `start` endpoint, which
+`spawn()`s the stage and returns in milliseconds while the work continues. That
+is what lets a serverless frontend drive hour-long jobs with no always-on worker
+and no polling loop.
+
+Artifacts go to a Modal volume rather than the container filesystem, which is
+discarded when a function returns, and are served back over HTTP for the
+dashboard to proxy.
+
+### 1. Database
+
+Create a Postgres database (Neon works well) and put its connection string in
+`.env`:
+
+```bash
+DATABASE_URL=postgresql://…
+```
+
+Use the **pooled** endpoint — it suits short-lived serverless connections. The
+schema is created on first connect; there is no migration step.
+
+`DATABASE_URL` is what selects Postgres. Without it the store is a local SQLite
+file, so local development needs no database at all. `SEESAW_DB_PATH` forces
+SQLite even when `DATABASE_URL` is set, which is how CI avoids writing into
+production.
+
+### 2. Modal secret
+
+Both Modal apps read one secret. `RUNNER_KEY` is generated here — it guards the
+endpoint that starts jobs.
+
+```bash
+modal secret create seesaw-secrets \
+  ANTHROPIC_API_KEY=… \
+  DATABASE_URL=… \
+  FIRECRAWL_API_KEY=… \
+  RUNNER_KEY=$(python -c 'import secrets; print(secrets.token_urlsafe(18))')
+```
+
+### 3. Modal apps
+
+```bash
+modal deploy lens/modal_app.py          # GPU: the five experiment tools
+modal deploy orchestrator/modal_app.py  # CPU: Scout, Quill, Lens's graph
+```
+
+The runner's first deploy takes a few minutes — it installs CPU torch. It
+prints two URLs; keep both:
+
+```
+https://<account>--seesaw-runner-start.modal.run
+https://<account>--seesaw-runner-artifact.modal.run
+```
+
+Two volumes are created automatically: `seesaw-hf-cache` for model weights, so
+cold starts don't re-download from HuggingFace, and `seesaw-artifacts` for
+plans, bundles, critiques, and plots.
+
+### 4. Dashboard
+
+From the `seesaw-web` checkout:
+
+```bash
+vercel link
+vercel env add DATABASE_URL         production   # same string as above
+vercel env add MODAL_RUN_STAGE_URL  production   # the start URL
+vercel env add MODAL_ARTIFACT_URL   production   # the artifact URL
+vercel env add MODAL_INVOKE_TOKEN   production   # RUNNER_KEY
+vercel env add WRITE_KEY            production   # gates writes; generate one
+vercel deploy --prod
+```
+
+`WRITE_KEY` makes the dashboard read-only for anyone without it. Reads stay
+open; creating, approving, cancelling, and deleting need the key, since each
+spends Anthropic credit and GPU time. Hold it by visiting `?key=…` once, or send
+an `x-seesaw-key` header.
+
+**Use the project alias, not the deployment URL.** Vercel forces its own SSO on
+deployment-specific URLs (`<project>-<hash>-<team>.vercel.app`) whatever your
+settings, so the middleware never runs there. `vercel alias ls` shows the stable
+one.
+
+### 5. Check it
+
+```bash
+curl -s https://<your-app>.vercel.app/api/jobs                       # 200, open
+
+curl -s -o /dev/null -w '%{http_code}\n' -X POST \
+     -H 'content-type: application/json' -d '{"question":"x"}' \
+     https://<your-app>.vercel.app/api/jobs                          # 403, no key
+```
+
+Then create a job in the dashboard and watch it move `queued → running →
+awaiting_approval`.
+
+### Environment reference
+
+| Variable | Where | Purpose |
+|---|---|---|
+| `DATABASE_URL` | Modal secret, Vercel, `.env` | Job store. Unset locally means SQLite |
+| `SEESAW_DB_PATH` | local, CI | Force SQLite even when `DATABASE_URL` is set |
+| `SEESAW_ARTIFACTS_DIR` | Modal image | Redirects all three agents' outputs to the volume |
+| `SEESAW_LENS_BACKEND` | Modal runner | `modal` sends experiments to the GPU app; default `local` |
+| `RUNNER_KEY` | Modal secret | Guards the endpoint that starts jobs |
+| `WRITE_KEY` | Vercel | Gates dashboard writes |
+| `MODAL_RUN_STAGE_URL`, `MODAL_ARTIFACT_URL`, `MODAL_INVOKE_TOKEN` | Vercel | Point the dashboard at the runner |
+| `SEESAW_REPO_DIR` | local only | Lets the dashboard spawn a local worker instead of calling Modal |
+
+### Things that cost time to discover
+
+- **Neon's pooled endpoint is PgBouncer in transaction mode.** Session state
+  doesn't reliably carry between statements, so `SET search_path` silently stops
+  applying — `current_schema()` came back NULL on a connection whose
+  `search_path` looked correct. Anything session-scoped (`SET`, advisory locks,
+  temp tables) is unsafe there; the store schema-qualifies its table instead.
+- **Connection latency dominates.** Connect-per-query took 4.6s per read. A
+  module-level pool, schema DDL once per pool rather than per query, and
+  autocommit — single-statement operations never needed a transaction — brought
+  it to 276ms, about one round trip.
+- **The CPU runner still needs torch.** `run_experiment` imports the tool
+  registry, and reading a tool's signature imports modules that import torch and
+  matplotlib. Install the CPU wheels; the forward passes still happen on the GPU
+  app.
+- **Agent output paths were derived from `__file__`.** On Modal that's a
+  container discarded when the function returns, so artifacts vanished and the
+  dashboard showed empty tabs. `SEESAW_ARTIFACTS_DIR` exists for this.
+- **Device placement only fails on a GPU.** A tensor created without a device
+  lands on CPU and breaks against model weights on `cuda`. Nothing local catches
+  it.
+- **arXiv rate-limits per client instance.** Constructing a fresh
+  `arxiv.Client()` per call resets its politeness delay, which reliably produced
+  HTTP 429 in deployment while surviving locally, where runs are spaced apart by
+  hand.
+- **`modal deploy` executes the app file locally**, so anything imported at
+  module scope must be installed on your machine, not just in the image — keep
+  `fastapi` and similar imports inside the functions.
 
 ### Running an MCP server as a persistent process
 
-By default `mcp.run()` in each `server.py` uses stdio transport, meant for a parent process (like Claude Desktop or another agent) to spawn and talk to over stdin/stdout. To expose a server over the network instead, change the transport in `server.py`:
+Separate from the above: each agent is also usable standalone over MCP. By
+default `mcp.run()` in each `server.py` uses stdio transport, meant for a parent
+process (Claude Desktop, or another agent) to spawn and talk to over
+stdin/stdout. To expose one over the network instead:
 
 ```python
 if __name__ == "__main__":
     mcp.run(transport="streamable-http", port=8001)
 ```
 
-Then run it as a long-lived process (e.g. under `systemd`, `supervisord`, or a container):
+Then run it as a long-lived process under `systemd`, `supervisord`, or a
+container:
 
 ```bash
 python -m lens.mcp_server.src.server
 ```
-
-### Registering with an external MCP client
-
-For stdio transport (e.g. Claude Desktop's `claude_desktop_config.json`):
-
-```json
-{
-  "mcpServers": {
-    "lens": {
-      "command": "/path/to/.venv/bin/python",
-      "args": ["-m", "lens.mcp_server.src.server"],
-      "cwd": "/path/to/seesaw"
-    }
-  }
-}
-```
-
-### Things to set up before any real deployment
-
-None of the following exist yet — treat this as a checklist, not a description of current behavior:
-
-- **Secrets management** — `.env` works locally; a deployed version needs the API keys injected via the hosting platform's secret store, not a checked-in file.
-- **Persistence** — every agent's `db/` folder is a placeholder. Outputs are plain files on local disk (`*/outputs/`). Multi-instance or ephemeral-filesystem deployment (e.g. serverless) will lose this data unless you add real storage.
-- **Concurrency** — `lens/mcp_server/src/app/model_session.py` caches loaded TransformerLens models in an in-process dict. Running multiple instances means each reloads models independently; there's no shared cache.
-- **Timeouts / resource limits** — Lens's sandbox (`app/sandbox.py`) has a configurable timeout (`SANDBOX_TIMEOUT`, default 300s) per experiment, but nothing bounds total memory or GPU usage. TransformerLens experiments can be memory-heavy on larger models — size the host accordingly.
-- **Monitoring** — no logging/tracing integration currently wired in (no equivalent of the `course/` reference implementations' Opik hooks).
 
 ---
 
