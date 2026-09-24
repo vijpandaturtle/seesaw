@@ -1,0 +1,277 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Seesaw — Agentic Mechanistic Interpretability Research</title>
+<meta name="description" content="Seesaw is a multi-agent system that automates the hypothesis → experiment → critique loop in mechanistic interpretability research.">
+<link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>⚖️</text></svg>">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600;700&family=IBM+Plex+Sans:wght@400;500;600&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --bg: #f5f6fa;
+    --bg-alt: #eceef5;
+    --text: #10121c;
+    --text-dim: #565b72;
+    --border: #dbdee9;
+    --accent: #5b3df6;
+    --accent-soft: #e8e3ff;
+    --card: #ffffff;
+    --code-bg: #edeffa;
+    --mono: "JetBrains Mono", "SF Mono", Menlo, Consolas, monospace;
+    --sans: "IBM Plex Sans", -apple-system, "Segoe UI", system-ui, sans-serif;
+    --display: "Space Grotesk", var(--sans);
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --bg: #0d0e16;
+      --bg-alt: #14151f;
+      --text: #eceefb;
+      --text-dim: #9498b3;
+      --border: #262838;
+      --accent: #8f7bff;
+      --accent-soft: #241f42;
+      --card: #14151f;
+      --code-bg: #10111a;
+    }
+  }
+  :root[data-theme="dark"] {
+    --bg: #0d0e16;
+    --bg-alt: #14151f;
+    --text: #eceefb;
+    --text-dim: #9498b3;
+    --border: #262838;
+    --accent: #8f7bff;
+    --accent-soft: #241f42;
+    --card: #14151f;
+    --code-bg: #10111a;
+  }
+  * { box-sizing: border-box; }
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: var(--sans);
+    line-height: 1.6;
+    margin: 0;
+  }
+  a { color: var(--accent); text-decoration: none; }
+  a:hover { text-decoration: underline; }
+  .wrap { max-width: 920px; margin: 0 auto; padding: 0 24px; }
+  code, .mono { font-family: var(--mono); }
+
+  header.hero {
+    padding: 72px 0 48px;
+    text-align: center;
+    border-bottom: 1px solid var(--border);
+  }
+  header.hero .kicker {
+    font-size: 13px;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+    color: var(--text-dim);
+    margin-bottom: 14px;
+  }
+  header.hero h1 {
+    font-family: var(--display);
+    font-size: 46px;
+    font-weight: 700;
+    margin: 0 0 14px;
+    letter-spacing: -0.02em;
+  }
+  header.hero p.tagline {
+    font-size: 19px;
+    color: var(--text-dim);
+    max-width: 620px;
+    margin: 0 auto 28px;
+  }
+  .cta-row { display: flex; gap: 12px; justify-content: center; flex-wrap: wrap; }
+  .btn {
+    display: inline-block;
+    padding: 10px 20px;
+    border-radius: 8px;
+    font-size: 14.5px;
+    font-weight: 600;
+    border: 1px solid var(--border);
+  }
+  .btn:hover { text-decoration: none; }
+  .btn.primary { background: var(--accent); color: #fff; border-color: var(--accent); }
+  .btn.primary:hover { opacity: 0.9; }
+  .btn.ghost { color: var(--text); background: var(--card); }
+  .btn.ghost:hover { border-color: var(--accent); color: var(--accent); }
+
+  section { padding: 56px 0; border-bottom: 1px solid var(--border); }
+  section:last-of-type { border-bottom: none; }
+  section h2 {
+    font-family: var(--mono);
+    font-size: 13px;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    color: var(--accent);
+    margin: 0 0 22px;
+  }
+  section p { color: var(--text-dim); max-width: 700px; }
+
+  .pipeline {
+    display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+    font-family: var(--mono); font-size: 14px; margin: 24px 0;
+  }
+  .pipeline .stage {
+    background: var(--accent-soft); color: var(--accent);
+    padding: 6px 12px; border-radius: 6px; font-weight: 700;
+  }
+  .pipeline .arrow { color: var(--text-dim); }
+
+  img.diagram {
+    width: 100%; border-radius: 10px; border: 1px solid var(--border);
+    display: block; margin-top: 8px;
+  }
+
+  .agent-grid {
+    display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+    gap: 18px; margin-top: 24px;
+  }
+  .agent-card {
+    background: var(--card); border: 1px solid var(--border);
+    border-radius: 12px; padding: 22px;
+  }
+  .agent-card .emoji { font-size: 26px; }
+  .agent-card h3 { font-family: var(--display); margin: 10px 0 4px; font-size: 19px; }
+  .agent-card .role { color: var(--accent); font-size: 13px; font-weight: 600; margin-bottom: 10px; }
+  .agent-card p { font-size: 14.5px; margin: 0 0 10px; color: var(--text-dim); }
+  .agent-card .stack { font-size: 12.5px; color: var(--text-dim); font-family: var(--mono); }
+
+  table.tools { width: 100%; border-collapse: collapse; margin-top: 20px; font-size: 14.5px; }
+  table.tools th, table.tools td { text-align: left; padding: 10px 12px; border-bottom: 1px solid var(--border); }
+  table.tools th { color: var(--text-dim); font-weight: 600; font-size: 13px; text-transform: uppercase; letter-spacing: 0.04em; }
+  table.tools td.tool-name { font-family: var(--mono); color: var(--accent); }
+
+  .stat-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 16px; margin-top: 24px; }
+  .stat { background: var(--card); border: 1px solid var(--border); border-radius: 10px; padding: 18px; text-align: center; }
+  .stat .num { font-size: 26px; font-weight: 700; color: var(--accent); }
+  .stat .label { font-size: 13px; color: var(--text-dim); margin-top: 4px; }
+
+  .series-list { list-style: none; padding: 0; margin: 20px 0 0; }
+  .series-list li {
+    padding: 14px 0; border-bottom: 1px solid var(--border);
+    display: flex; justify-content: space-between; gap: 16px; flex-wrap: wrap;
+  }
+  .series-list li:last-child { border-bottom: none; }
+  .series-list .title { font-weight: 600; font-size: 15px; }
+  .series-list .desc { color: var(--text-dim); font-size: 13.5px; }
+
+  footer { padding: 40px 0 60px; text-align: center; color: var(--text-dim); font-size: 13.5px; }
+  footer a { color: var(--text-dim); margin: 0 8px; }
+  footer a:hover { color: var(--accent); }
+</style>
+</head>
+<body>
+
+<header class="hero">
+  <div class="wrap">
+    <div class="kicker">Agentic Mechanistic Interpretability</div>
+    <h1>Seesaw</h1>
+    <p class="tagline">A multi-agent system that automates the hypothesis → experiment → critique loop in mechanistic interpretability research — plan, run, and critique, with a human approving every step.</p>
+    <div class="cta-row">
+      <a class="btn primary" href="https://github.com/vijpandaturtle/seesaw">GitHub</a>
+      <a class="btn ghost" href="https://seesaw-web-five.vercel.app/">Live Dashboard ↗</a>
+      <a class="btn ghost" href="https://mindsandai.substack.com/s/build-logs">Build Log ↗</a>
+    </div>
+  </div>
+</header>
+
+<section id="overview">
+  <div class="wrap">
+    <h2>Overview</h2>
+    <p>A human researcher provides a research question. Three agents handle the rest — planning, execution, and review — with human-in-the-loop checkpoints between every stage, so nothing runs without approval.</p>
+    <div class="pipeline">
+      <span class="stage">Scout</span>
+      <span class="arrow">research question → Research Plan →</span>
+      <span class="stage">Lens</span>
+      <span class="arrow">Research Plan → ExperimentBundle →</span>
+      <span class="stage">Quill</span>
+      <span class="arrow">ExperimentBundle → CritiqueReport</span>
+    </div>
+    <img class="diagram" src="assets/seesaw-v0.jpg" alt="Seesaw v0 architecture diagram">
+  </div>
+</section>
+
+<section id="agents">
+  <div class="wrap">
+    <h2>The Three Agents</h2>
+    <div class="agent-grid">
+      <div class="agent-card">
+        <div class="emoji">🔭</div>
+        <h3>Scout</h3>
+        <div class="role">The Research Planner</div>
+        <p>A ReAct agent that searches arXiv and the web, then commits to a falsifiable hypothesis and a concrete experiment sequence for Lens to run.</p>
+        <div class="stack">LangGraph ReAct · Claude · Firecrawl</div>
+      </div>
+      <div class="agent-card">
+        <div class="emoji">🔬</div>
+        <h3>Lens</h3>
+        <div class="role">The Experiment Runner</div>
+        <p>A six-node LangGraph state machine that executes TransformerLens experiments from the plan, interprets each result, and can queue adaptive follow-ups.</p>
+        <div class="stack">LangGraph StateGraph · Claude · TransformerLens</div>
+      </div>
+      <div class="agent-card">
+        <div class="emoji">🪶</div>
+        <h3>Quill</h3>
+        <div class="role">The Reviewer</div>
+        <p>Critiques the experiment bundle like a peer reviewer — flags methodological gaps and unsupported conclusions, and generates executable follow-up specs.</p>
+        <div class="stack">LangGraph StateGraph · Claude Opus</div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section id="tools">
+  <div class="wrap">
+    <h2>Lens's Tools</h2>
+    <p>Five TransformerLens-based diagnostic and causal tools, each independently callable.</p>
+    <table class="tools">
+      <tr><th>Tool</th><th>Answers</th></tr>
+      <tr><td class="tool-name">logit_lens</td><td>Where across layers does the model commit to an answer?</td></tr>
+      <tr><td class="tool-name">attention_pattern</td><td>Which tokens does each head attend to?</td></tr>
+      <tr><td class="tool-name">direct_logit_attribution</td><td>Which components write the final prediction?</td></tr>
+      <tr><td class="tool-name">ablation</td><td>Is this component causally necessary?</td></tr>
+      <tr><td class="tool-name">activation_patching</td><td>Which layer and position carries the signal?</td></tr>
+    </table>
+  </div>
+</section>
+
+<section id="evals">
+  <div class="wrap">
+    <h2>Evaluation</h2>
+    <p>A three-layer eval suite: graders, fixtures that validate the graders themselves, and tasks built from published ground-truth papers plus adversarial probes.</p>
+    <div class="stat-grid">
+      <div class="stat"><div class="num">29</div><div class="label">grading functions</div></div>
+      <div class="stat"><div class="num">56</div><div class="label">grader fixtures</div></div>
+      <div class="stat"><div class="num">30/30</div><div class="label">offline fixtures pass</div></div>
+      <div class="stat"><div class="num">15</div><div class="label">ground-truth + adversarial tasks</div></div>
+    </div>
+  </div>
+</section>
+
+<section id="deployment">
+  <div class="wrap">
+    <h2>Deployment</h2>
+    <p>Nothing always-on. Scout, Quill, and Lens's graph run on a Modal CPU app; Lens's five experiment tools run on a Modal GPU app with per-second billing. A thin Next.js dashboard on Vercel queues jobs and reads state from a Postgres (Neon) job store — the dashboard never executes an agent directly.</p>
+  </div>
+</section>
+
+<footer>
+  <div class="wrap">
+    <div>Apache 2.0 licensed</div>
+    <div style="margin-top:10px;">
+      <a href="https://github.com/vijpandaturtle/seesaw">GitHub</a>·
+      <a href="https://github.com/vijpandaturtle/seesaw/blob/main/DOCS.md">Setup Docs</a>·
+      <a href="https://seesaw-web-five.vercel.app/">Live Dashboard</a>·
+      <a href="https://mindsandai.substack.com">Blog</a>
+    </div>
+  </div>
+</footer>
+
+</body>
+</html>
