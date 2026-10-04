@@ -3,180 +3,165 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Seesaw — Agentic Mechanistic Interpretability Research</title>
+<meta name="theme-color" content="#dceaff">
+<title>Seesaw - AI Safety</title>
 <meta name="description" content="Seesaw is a multi-agent system that automates the hypothesis → experiment → critique loop in mechanistic interpretability research.">
 <link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>⚖️</text></svg>">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600;700&family=IBM+Plex+Sans:wght@400;500;600&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600&family=Space+Grotesk:wght@500;600;700&display=swap" rel="stylesheet">
 <style>
   :root {
-    --bg: #f5f6fa;
-    --bg-alt: #eceef5;
-    --text: #10121c;
-    --text-dim: #565b72;
-    --border: #dbdee9;
-    --accent: #5b3df6;
-    --accent-soft: #e8e3ff;
-    --card: #ffffff;
-    --code-bg: #edeffa;
-    --mono: "JetBrains Mono", "SF Mono", Menlo, Consolas, monospace;
-    --sans: "IBM Plex Sans", -apple-system, "Segoe UI", system-ui, sans-serif;
-    --display: "Space Grotesk", var(--sans);
-  }
-  @media (prefers-color-scheme: dark) {
-    :root:not([data-theme="light"]) {
-      --bg: #0d0e16;
-      --bg-alt: #14151f;
-      --text: #eceefb;
-      --text-dim: #9498b3;
-      --border: #262838;
-      --accent: #8f7bff;
-      --accent-soft: #241f42;
-      --card: #14151f;
-      --code-bg: #10111a;
-    }
-  }
-  :root[data-theme="dark"] {
-    --bg: #0d0e16;
-    --bg-alt: #14151f;
-    --text: #eceefb;
-    --text-dim: #9498b3;
-    --border: #262838;
-    --accent: #8f7bff;
-    --accent-soft: #241f42;
-    --card: #14151f;
-    --code-bg: #10111a;
+    color-scheme: light;
+    --bg: #f3f8ff;
+    --surface: rgba(255, 255, 255, .78);
+    --text: #0f172a;
+    --muted: #5b6577;
+    --line: #d9e4f3;
+    --accent: #2563eb;
+    --accent-bright: #1d4ed8;
+    --accent-soft: #e0ecff;
+    --glow: rgba(125, 178, 255, .35);
+    --serif: "Space Grotesk", system-ui, sans-serif;
+    --sans: "IBM Plex Sans", system-ui, -apple-system, sans-serif;
+    --mono: "IBM Plex Mono", ui-monospace, monospace;
   }
   * { box-sizing: border-box; }
+  html { scroll-behavior: smooth; scroll-padding-top: 72px; }
   body {
-    background: var(--bg);
-    color: var(--text);
-    font-family: var(--sans);
-    line-height: 1.6;
-    margin: 0;
+    margin: 0; color: var(--text);
+    background-color: var(--bg);
+    background-image:
+      radial-gradient(ellipse 80% 55% at 85% 0%, var(--glow), transparent 70%),
+      linear-gradient(180deg, #dceaff 0%, #eef5ff 35%, #ffffff 100%);
+    background-attachment: fixed;
+    font: 15px/1.6 var(--sans); -webkit-font-smoothing: antialiased;
   }
-  a { color: var(--accent); text-decoration: none; }
-  a:hover { text-decoration: underline; }
-  .wrap { max-width: 920px; margin: 0 auto; padding: 0 24px; }
+  a { color: inherit; text-decoration-color: var(--accent); text-underline-offset: 3px; }
+  a:hover { color: var(--accent-bright); }
+  .wrap { max-width: 1040px; margin: 0 auto; padding: 0 24px; }
   code, .mono { font-family: var(--mono); }
 
-  header.hero {
-    padding: 72px 0 48px;
-    text-align: center;
-    border-bottom: 1px solid var(--border);
+  /* Nav */
+  .nav {
+    position: sticky; top: 0; z-index: 10;
+    background: color-mix(in srgb, var(--bg) 85%, transparent);
+    backdrop-filter: blur(10px); border-bottom: 1px solid var(--line);
   }
-  header.hero .kicker {
-    font-size: 13px;
-    letter-spacing: 0.14em;
-    text-transform: uppercase;
-    color: var(--text-dim);
-    margin-bottom: 14px;
-  }
-  header.hero h1 {
-    font-family: var(--display);
-    font-size: 46px;
-    font-weight: 700;
-    margin: 0 0 14px;
-    letter-spacing: -0.02em;
-  }
-  header.hero p.tagline {
-    font-size: 19px;
-    color: var(--text-dim);
-    max-width: 620px;
-    margin: 0 auto 28px;
-  }
-  .cta-row { display: flex; gap: 12px; justify-content: center; flex-wrap: wrap; }
+  .nav-inner { display: flex; justify-content: space-between; align-items: center; height: 60px; }
+  .brand { font: 600 17px var(--serif); text-decoration: none; }
+  .brand span { color: var(--accent); }
+  .nav nav { display: flex; gap: 22px; align-items: center; }
+  .nav nav a { text-decoration: none; font-size: 13px; color: var(--muted); }
+  .nav nav a:hover { color: var(--text); }
+
+  /* Hero */
+  header.hero { padding: 80px 0 56px; }
+  .kicker { font: 500 13px var(--mono); color: var(--accent-bright); letter-spacing: .04em; text-transform: uppercase; margin: 0 0 16px; }
+  h1 { font: 600 clamp(36px, 6vw, 60px)/1.05 var(--serif); letter-spacing: -.035em; margin: 0 0 28px; }
+  .tagline { font-size: 16.5px; max-width: 700px; color: var(--muted); margin: 0 0 32px; }
+  .cta-row { display: flex; flex-wrap: wrap; gap: 10px; }
   .btn {
-    display: inline-block;
-    padding: 10px 20px;
-    border-radius: 8px;
-    font-size: 14.5px;
-    font-weight: 600;
-    border: 1px solid var(--border);
+    text-decoration: none; padding: 9px 16px; border-radius: 999px; font-size: 13px; font-weight: 500;
+    border: 1px solid var(--line); background: var(--surface);
   }
-  .btn:hover { text-decoration: none; }
-  .btn.primary { background: var(--accent); color: #fff; border-color: var(--accent); }
-  .btn.primary:hover { opacity: 0.9; }
-  .btn.ghost { color: var(--text); background: var(--card); }
-  .btn.ghost:hover { border-color: var(--accent); color: var(--accent); }
+  .btn.primary { background: var(--text); color: #fff; border-color: var(--text); }
+  .btn.primary:hover { background: var(--accent-bright); border-color: var(--accent-bright); color: #fff; }
+  .btn:not(.primary):hover { border-color: var(--accent); }
 
-  section { padding: 56px 0; border-bottom: 1px solid var(--border); }
-  section:last-of-type { border-bottom: none; }
-  section h2 {
-    font-family: var(--mono);
-    font-size: 13px;
-    letter-spacing: 0.12em;
-    text-transform: uppercase;
-    color: var(--accent);
-    margin: 0 0 22px;
-  }
-  section p { color: var(--text-dim); max-width: 700px; }
+  /* Sections */
+  section { padding: 56px 0; }
+  h2 { font: 600 26px var(--serif); margin: 0 0 24px; letter-spacing: -.01em; }
+  h3 { font: 600 16.5px/1.35 var(--sans); margin: 0 0 8px; }
+  section p { color: var(--muted); max-width: 700px; margin: 0 0 16px; }
 
-  .pipeline {
-    display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
-    font-family: var(--mono); font-size: 14px; margin: 24px 0;
-  }
+  .pipeline { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; font: 13px var(--mono); margin: 24px 0; }
   .pipeline .stage {
-    background: var(--accent-soft); color: var(--accent);
-    padding: 6px 12px; border-radius: 6px; font-weight: 700;
+    font-weight: 500; text-transform: uppercase; letter-spacing: .05em; font-size: 11.5px;
+    color: var(--accent-bright); background: var(--accent-soft); padding: 4px 11px; border-radius: 999px;
   }
-  .pipeline .arrow { color: var(--text-dim); }
+  .pipeline .arrow { color: var(--muted); }
 
   img.diagram {
-    width: 100%; border-radius: 10px; border: 1px solid var(--border);
-    display: block; margin-top: 8px;
+    width: 100%; display: block; margin-top: 8px; border-radius: 14px;
+    border: 1px solid var(--line); box-shadow: 0 20px 50px rgba(37, 99, 235, .12);
   }
 
-  .agent-grid {
-    display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
-    gap: 18px; margin-top: 24px;
-  }
+  /* Cards */
+  .agent-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px; }
   .agent-card {
-    background: var(--card); border: 1px solid var(--border);
-    border-radius: 12px; padding: 22px;
+    background: var(--surface); border: 1px solid var(--line); border-radius: 14px; padding: 24px;
+    transition: border-color .2s, transform .2s;
   }
-  .agent-card .emoji { font-size: 26px; }
-  .agent-card h3 { font-family: var(--display); margin: 10px 0 4px; font-size: 19px; }
-  .agent-card .role { color: var(--accent); font-size: 13px; font-weight: 600; margin-bottom: 10px; }
-  .agent-card p { font-size: 14.5px; margin: 0 0 10px; color: var(--text-dim); }
-  .agent-card .stack { font-size: 12.5px; color: var(--text-dim); font-family: var(--mono); }
-
-  table.tools { width: 100%; border-collapse: collapse; margin-top: 20px; font-size: 14.5px; }
-  table.tools th, table.tools td { text-align: left; padding: 10px 12px; border-bottom: 1px solid var(--border); }
-  table.tools th { color: var(--text-dim); font-weight: 600; font-size: 13px; text-transform: uppercase; letter-spacing: 0.04em; }
-  table.tools td.tool-name { font-family: var(--mono); color: var(--accent); }
-
-  .stat-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 16px; margin-top: 24px; }
-  .stat { background: var(--card); border: 1px solid var(--border); border-radius: 10px; padding: 18px; text-align: center; }
-  .stat .num { font-size: 26px; font-weight: 700; color: var(--accent); }
-  .stat .label { font-size: 13px; color: var(--text-dim); margin-top: 4px; }
-
-  .series-list { list-style: none; padding: 0; margin: 20px 0 0; }
-  .series-list li {
-    padding: 14px 0; border-bottom: 1px solid var(--border);
-    display: flex; justify-content: space-between; gap: 16px; flex-wrap: wrap;
+  .agent-card:hover { border-color: var(--accent); transform: translateY(-2px); box-shadow: 0 10px 40px rgba(37, 99, 235, .14); }
+  .agent-card .emoji { font-size: 24px; }
+  .agent-card h3 { font: 600 21px/1.25 var(--serif); margin: 10px 0 8px; }
+  .agent-card .role {
+    display: inline-block; font: 500 11px var(--mono); text-transform: uppercase; letter-spacing: .05em;
+    color: var(--accent-bright); background: var(--accent-soft); padding: 3px 9px; border-radius: 999px; margin-bottom: 14px;
   }
-  .series-list li:last-child { border-bottom: none; }
-  .series-list .title { font-weight: 600; font-size: 15px; }
-  .series-list .desc { color: var(--text-dim); font-size: 13.5px; }
+  .agent-card p { font-size: 14px; margin: 0 0 12px; }
+  .agent-card .stack { font: 400 12px var(--mono); color: var(--muted); }
 
-  footer { padding: 40px 0 60px; text-align: center; color: var(--text-dim); font-size: 13.5px; }
-  footer a { color: var(--text-dim); margin: 0 8px; }
-  footer a:hover { color: var(--accent); }
+  /* Tools table */
+  table.tools { width: 100%; border-collapse: collapse; margin-top: 8px; font-size: 14px; }
+  table.tools th, table.tools td { text-align: left; padding: 12px 12px 12px 0; border-top: 1px solid var(--line); }
+  table.tools tr:last-child td { border-bottom: 1px solid var(--line); }
+  table.tools th { font: 500 12px var(--mono); text-transform: uppercase; letter-spacing: .06em; color: var(--muted); border-top: 0; }
+  table.tools td.tool-name { font: 500 13px var(--mono); color: var(--accent); white-space: nowrap; padding-right: 24px; }
+
+  /* Stats */
+  .stat-grid {
+    display: grid; grid-template-columns: repeat(4, 1fr); margin: 32px 0 0;
+    border-top: 1px solid var(--line); border-bottom: 1px solid var(--line);
+  }
+  .stat { padding: 20px 20px 20px 0; }
+  .stat + .stat { padding-left: 20px; border-left: 1px solid var(--line); }
+  .stat .num { font: 600 21px var(--serif); }
+  .stat .label { margin-top: 4px; font-size: 12px; color: var(--muted); }
+
+  /* Footer */
+  footer { padding: 32px 0 40px; border-top: 1px solid var(--line); font-size: 13px; color: var(--muted); }
+  footer .wrap { display: flex; justify-content: space-between; gap: 16px; flex-wrap: wrap; }
+  footer .links { display: flex; gap: 20px; flex-wrap: wrap; }
+  footer a { text-decoration: none; }
+
+  @media (max-width: 760px) {
+    .wrap { padding: 0 16px; }
+    header.hero { padding: 48px 0; }
+    .nav nav a:not(:nth-child(-n+2)) { display: none; }
+    .agent-grid { grid-template-columns: 1fr; }
+    .stat-grid { grid-template-columns: 1fr 1fr; }
+    .stat:nth-child(3) { border-left: 0; padding-left: 0; border-top: 1px solid var(--line); }
+    .stat:nth-child(4) { border-top: 1px solid var(--line); }
+    table.tools td.tool-name { white-space: normal; overflow-wrap: anywhere; }
+  }
 </style>
 </head>
 <body>
 
+<div class="nav">
+  <div class="wrap nav-inner">
+    <a class="brand" href="#">Seesaw<span>.</span></a>
+    <nav>
+      <a href="#overview">Overview</a>
+      <a href="#agents">Agents</a>
+      <a href="#tools">Tools</a>
+      <a href="#evals">Evals</a>
+      <a href="https://vijpandaturtle.github.io/">Vijayasri Iyer ↗</a>
+    </nav>
+  </div>
+</div>
+
 <header class="hero">
   <div class="wrap">
-    <div class="kicker">Agentic Mechanistic Interpretability</div>
+    <div class="kicker">Agentic AI Safety</div>
     <h1>Seesaw</h1>
-    <p class="tagline">A multi-agent system that automates the hypothesis → experiment → critique loop in mechanistic interpretability research — plan, run, and critique, with a human approving every step.</p>
+    <p class="tagline">A multi-agent system that automates the end-to-end hypothesis → experiment → critique loop in mechanistic interpretability research.</p>
     <div class="cta-row">
       <a class="btn primary" href="https://github.com/vijpandaturtle/seesaw">GitHub</a>
-      <a class="btn ghost" href="https://seesaw-web-five.vercel.app/">Live Dashboard ↗</a>
-      <a class="btn ghost" href="https://mindsandai.substack.com/s/build-logs">Build Log ↗</a>
+      <a class="btn" href="https://seesaw-web-five.vercel.app/">Live Dashboard ↗</a>
+      <a class="btn" href="https://mindsandai.substack.com/s/build-logs">Build Log ↗</a>
     </div>
   </div>
 </header>
@@ -184,7 +169,7 @@
 <section id="overview">
   <div class="wrap">
     <h2>Overview</h2>
-    <p>A human researcher provides a research question. Three agents handle the rest — planning, execution, and review — with human-in-the-loop checkpoints between every stage, so nothing runs without approval.</p>
+    <p>A human researcher provides a research question. Three agents handle the planning, execution, and review with human-in-the-loop checkpoints between every stage to ensure high quality results.</p>
     <div class="pipeline">
       <span class="stage">Scout</span>
       <span class="arrow">research question → Research Plan →</span>
@@ -263,11 +248,11 @@
 
 <footer>
   <div class="wrap">
-    <div>Apache 2.0 licensed</div>
-    <div style="margin-top:10px;">
-      <a href="https://github.com/vijpandaturtle/seesaw">GitHub</a>·
-      <a href="https://github.com/vijpandaturtle/seesaw/blob/main/DOCS.md">Setup Docs</a>·
-      <a href="https://seesaw-web-five.vercel.app/">Live Dashboard</a>·
+    <span>Apache 2.0 licensed · built by <a href="https://vijpandaturtle.github.io/">Vijayasri Iyer</a></span>
+    <div class="links">
+      <a href="https://github.com/vijpandaturtle/seesaw">GitHub</a>
+      <a href="https://github.com/vijpandaturtle/seesaw/blob/main/DOCS.md">Setup Docs</a>
+      <a href="https://seesaw-web-five.vercel.app/">Live Dashboard</a>
       <a href="https://mindsandai.substack.com">Blog</a>
     </div>
   </div>
