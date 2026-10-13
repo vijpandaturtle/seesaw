@@ -1,7 +1,7 @@
 """A small client for the Neuronpedia API — feature labels, top logits, and which features fire on a text.
 
 Neuronpedia hosts SAEs for many open models along with an auto-generated
-explanation for each feature. Seesaw uses it for two things:
+explanation for each feature. Seesaw uses it for three things:
 
 - `get_feature` — the human-readable side of a feature found locally: its
   explanation, the tokens it promotes and suppresses, and a dashboard link.
@@ -9,6 +9,10 @@ explanation for each feature. Seesaw uses it for two things:
   Neuronpedia's servers. No SAE download, no local model: the cheapest way to
   see what features a prompt involves, and it works for models too large to
   run here.
+- `get_graph` / `generate_graph` — attribution graphs (circuit tracing, Ameisen
+  et al. 2025) computed by circuit-tracer on Neuronpedia's GPUs. Reading an
+  existing graph is free and private; generating one PUBLISHES it: the graph
+  and its prompt are stored on Neuronpedia under a public URL.
 
 Responses are cached on disk (`~/.cache/seesaw/neuronpedia`, or
 `SEESAW_NEURONPEDIA_CACHE`). Neuronpedia's explanations can be regenerated
@@ -40,7 +44,8 @@ def _cache_dir() -> Path:
     return Path(os.environ.get("SEESAW_NEURONPEDIA_CACHE", Path.home() / ".cache/seesaw/neuronpedia"))
 
 
-def _request(method: str, path: str, body: dict | None = None, use_cache: bool = True) -> dict:
+def _request(method: str, path: str, body: dict | None = None, use_cache: bool = True,
+             timeout: float = TIMEOUT_S) -> dict:
     key = hashlib.sha256(json.dumps([method, path, body], sort_keys=True).encode()).hexdigest()[:24]
     cached = _cache_dir() / f"{key}.json"
     if use_cache and cached.exists():
@@ -52,8 +57,11 @@ def _request(method: str, path: str, body: dict | None = None, use_cache: bool =
     data = json.dumps(body).encode() if body is not None else None
     req = urllib.request.Request(BASE_URL + path, data=data, headers=headers, method=method)
     try:
-        with urllib.request.urlopen(req, timeout=TIMEOUT_S) as resp:
+        with urllib.request.urlopen(req, timeout=timeout) as resp:
             payload = json.loads(resp.read())
+    except urllib.error.HTTPError as exc:
+        detail = exc.read().decode(errors="replace")[:300]
+        raise NeuronpediaError(f"{method} {path} failed: HTTP {exc.code}: {detail}") from exc
     except (urllib.error.URLError, TimeoutError, json.JSONDecodeError) as exc:
         raise NeuronpediaError(f"{method} {path} failed: {exc}") from exc
 
@@ -140,4 +148,85 @@ def search_text(
             "url":            feature_url(source, hit["index"]),
         })
     return {"tokens": tokens, "features": features}
+
+
+# ── attribution graphs ───────────────────────────────────────────────────────
+GRAPH_TIMEOUT_S = 300           # generation runs circuit-tracer on a GPU; it takes a while
+
+
+def _download_json(url: str, use_cache: bool = True) -> dict:
+    key = hashlib.sha256(url.encode()).hexdigest()[:24]
+    cached = _cache_dir() / "graphs" / f"{key}.json"
+    if use_cache and cached.exists():
+        return json.loads(cached.read_text())
+    try:
+        with urllib.request.urlopen(urllib.request.Request(url, headers={"User-Agent": "seesaw"}),
+                                    timeout=GRAPH_TIMEOUT_S) as resp:
+            payload = json.loads(resp.read())
+    except (urllib.error.URLError, TimeoutError, json.JSONDecodeError) as exc:
+        raise NeuronpediaError(f"downloading graph {url} failed: {exc}") from exc
+    if use_cache:
+        cached.parent.mkdir(parents=True, exist_ok=True)
+        cached.write_text(json.dumps(payload))
+    return payload
+
+
+def graph_url(model_id: str, slug: str) -> str:
+    """The graph's page in Neuronpedia's attribution-graph viewer."""
+    return f"{BASE_URL}/{model_id}/graph?slug={slug}"
+
+
+def get_graph(model_id: str, slug: str, use_cache: bool = True) -> dict:
+    """Fetch an existing attribution graph by slug. Read-only.
+
+    Returns:
+        The graph JSON: {"metadata", "nodes", "links", ...} in the Anthropic /
+        circuit-tracer format, plus "source_set" (the transcoder set whose
+        Neuronpedia dashboards label its features).
+
+    Raises:
+        NeuronpediaError: no graph with that slug, or Neuronpedia unreachable.
+    """
+    meta = _request("GET", f"/api/graph/{model_id}/{slug}", use_cache=use_cache)
+    if "url" not in meta:
+        raise NeuronpediaError(f"no graph {model_id}/{slug}: {meta.get('error', meta)}")
+    graph = _download_json(meta["url"], use_cache=use_cache)
+    graph["source_set"] = meta.get("sourceSetName")
+    return graph
+
+
+def generate_graph(
+    prompt: str,
+    slug: str,
+    model_id: str = "gemma-2-2b",
+    max_feature_nodes: int = 5000,
+    node_threshold: float = 0.8,
+    edge_threshold: float = 0.85,
+) -> dict:
+    """Have Neuronpedia run circuit-tracer on `prompt`. PUBLISHES the graph.
+
+    The graph, its prompt and the slug are saved on Neuronpedia and anyone with
+    the URL can see them — don't send a prompt you wouldn't post. If a graph
+    with this slug already exists it is returned instead of regenerated.
+
+    Args:
+        prompt: Text to trace (Neuronpedia caps it at 64 tokens).
+        slug: Unique id for the graph: lowercase letters, digits, - and _.
+        model_id: A model Neuronpedia generates graphs for (gemma-2-2b).
+        max_feature_nodes / node_threshold / edge_threshold: circuit-tracer's
+            pruning settings; Neuronpedia's defaults.
+
+    Returns:
+        The graph JSON, as get_graph returns it.
+    """
+    try:
+        return get_graph(model_id, slug)
+    except NeuronpediaError:
+        pass
+    _request("POST", "/api/graph/generate", {
+        "prompt": prompt, "modelId": model_id, "slug": slug,
+        "maxFeatureNodes": max_feature_nodes, "nodeThreshold": node_threshold,
+        "edgeThreshold": edge_threshold,
+    }, use_cache=False, timeout=GRAPH_TIMEOUT_S)
+    return get_graph(model_id, slug)
 
