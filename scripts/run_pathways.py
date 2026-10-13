@@ -61,6 +61,31 @@ def attribute_audit_control(model):
                   [" she"] * 4, [" he"] * 4, OUT / "attribute_audit_control")
 
 
+def circuit_tracing(model):
+    """Reads the public Dallas → Austin graph on Neuronpedia (Gemma-2-2B); generates nothing."""
+    from seesaw.interp.circuit_finding import circuit_tracing as ct
+
+    out = OUT / "circuit_tracing"
+    r = ct.compute(out, slug="gemma-fact-dallas-austin", top_k=15)
+    lines = ["# circuit_tracing\n", f"**Graph:** {r.data['graph_url']}  ",
+             f"**Target:** {r.data['target']}  ",
+             f"**Influence through error nodes:** {r.data['error_influence_share']:.0%}\n",
+             "| Layer | Token | Influence | Feature |", "|---|---|---|---|"]
+    lines += [f"| {f['layer']} | {f['token']!r} | {f['influence']:.3f} | {f['explanation']} |"
+              for f in r.data["top_features"]]
+    return _Report("estimate", "\n".join(lines) + "\n")
+
+
+class _Report:
+    """Lets a single-tool case share main()'s report writing with the pathways."""
+
+    def __init__(self, verdict: str, markdown: str):
+        self.verdict, self._md = verdict, markdown
+
+    def to_markdown(self) -> str:
+        return self._md
+
+
 def feature_explain(model):
     from seesaw.interp.feature_extraction.sae import load_sae
     from seesaw.pathways import feature_explain as pw
@@ -69,7 +94,8 @@ def feature_explain(model):
     return pw.run(model, sae, IOI, IO, S, OUT / "feature_explain")
 
 
-CASES = {f.__name__: f for f in (circuit_discovery, attribute_audit, attribute_audit_control, feature_explain)}
+CASES = {f.__name__: f for f in (circuit_discovery, attribute_audit, attribute_audit_control,
+                                  feature_explain, circuit_tracing)}
 
 
 def main() -> None:
