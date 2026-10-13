@@ -1,5 +1,9 @@
+from shared.lens_tools import bullet_list
+
 from ..models.schemas import ParsedPlanModel
-from ..tools import TOOL_REGISTRY, token_defaults_from_specs, tool_kwargs_guide
+from ..tools import (
+    TOOL_REGISTRY, prompt_pairs_from_specs, token_defaults_from_specs, tool_kwargs_guide,
+)
 from ..utils import make_llm
 
 
@@ -14,13 +18,16 @@ def parse_plan(state: dict) -> dict:
     prompt = (
         f"Extract the experiments from this Research Plan.\n"
         f"For each experiment, extract the tool name, model, prompts, and what to measure.\n"
-        f"Only include experiments whose tool is one of: {list(TOOL_REGISTRY.keys())}.\n\n"
+        f"Only include experiments whose tool is one of: {list(TOOL_REGISTRY.keys())}.\n"
+        f"What each tool does:\n{bullet_list()}\n\n"
         f"Each tool takes `model` and `prompts` automatically. Anything else goes in\n"
         f"tool_kwargs, using exactly these argument names — an experiment whose\n"
         f"tool_kwargs are missing or misnamed cannot run:\n"
         f"{tool_kwargs_guide()}\n\n"
         f"Give one positive/negative token per prompt, in the same order as prompts\n"
-        f"(a single pair is applied to every prompt). Token strings need their leading\n"
+        f"(a single pair is applied to every prompt). Corrupted and counterfactual prompts\n"
+        f"are one per prompt, in the same order, and must tokenize to the same length.\n"
+        f"Token strings need their leading\n"
         f"space, e.g. ' Mary' not 'Mary'.\n"
         f"If no specific prompts are given, generate 2-3 appropriate IOI-style prompts.\n\n"
         f"Research Plan:\n{state['research_plan']}"
@@ -36,6 +43,7 @@ def parse_plan(state: dict) -> dict:
         "model_name":        parsed.model_name,
         "experiment_queue":  queue,
         "token_defaults":    tokens,
+        "prompt_pairs":      prompt_pairs_from_specs(queue),
         "results":           [],
         "followup_count":    0,
         "last_result":       None,

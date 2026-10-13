@@ -1,7 +1,10 @@
+from shared.lens_tools import bullet_list
+
 from ..config import MAX_FOLLOWUPS
 from ..models.schemas import FollowUpDecision
-from ..tools import KWARG_ALIASES, TOOL_REGISTRY, tool_kwargs_guide
+from ..tools import KWARG_ALIASES, tool_kwargs_guide
 from ..utils import make_llm
+from .interpret_result import data_preview
 
 # Question-level arguments a follow-up inherits when it doesn't name its own.
 _INHERITED = ("positive_tokens", "negative_tokens")
@@ -19,6 +22,8 @@ def check_followup(state: dict) -> dict:
     its own. Prompts always carry over: the token pairs are aligned to them
     per prompt, and left to choose, the LLM fills prompts with research
     questions ("What does L9H9 attend to?") that then run as model input.
+    Their corrupted/counterfactual partners carry over with them, from the
+    plan, since the LLM writing the follow-up never saw them.
     """
     result         = state["last_result"]
     followup_count = state.get("followup_count", 0)
@@ -30,15 +35,20 @@ def check_followup(state: dict) -> dict:
     decision       = structured_llm.invoke(
         f"Based on this result, decide if an immediate follow-up is needed.\n"
         f"Be conservative — only if the result reveals something a different tool can directly test.\n"
-        f"Available tools: {list(TOOL_REGISTRY.keys())}\n\n"
+        f"Available tools:\n{bullet_list()}\n\n"
+        f"A natural follow-up checks an estimate or a descriptive result with a causal tool:\n"
+        f"attribution_patching or direct_logit_attribution -> head_patching or ablation with `heads`;\n"
+        f"confirmed heads -> circuit_evaluation; feature_attribution -> feature_clamping;\n"
+        f"linear_probe -> directional_ablation or steering_vector.\n\n"
         f"followup_kwargs must use exactly these argument names — a follow-up with\n"
         f"missing or misnamed kwargs cannot run:\n"
         f"{tool_kwargs_guide()}\n"
-        f"These tools sweep every head and layer; there is no way to restrict them to\n"
-        f"specific heads, so don't ask for that — read the sweep's heatmap instead.\n"
+        f"To test specific heads, use head_patching, circuit_evaluation, or ablation with\n"
+        f"`heads`, naming them as they appear in the summary (e.g. 'L9H9').\n"
         f"Reuse the same positive/negative tokens as the experiment you're following up on.\n\n"
         f"Follow-ups used: {followup_count}/{MAX_FOLLOWUPS}\n"
-        f"Summary: {result['summary']}"
+        f"Summary: {result['summary']}\n\n"
+        f"Key numbers (exact head names and feature indices are here): {data_preview(result['data'], 1_200)}"
     )
 
     if decision.needs_followup and decision.followup_tool:
@@ -50,6 +60,10 @@ def check_followup(state: dict) -> dict:
         for arg in _INHERITED:
             if arg not in kwargs and arg in inherited:
                 kwargs[arg] = inherited[arg]
+        pair = (state.get("prompt_pairs") or {}).get("\n".join(result["prompts"]))
+        if pair and not any(a in kwargs for a in ("corrupted_prompts", "counterfactual_prompts")):
+            # normalize_tool_kwargs renames this to counterfactual_prompts for tools that use that name.
+            kwargs["corrupted_prompts"] = pair
 
         new_spec = {
             "name":             f"Follow-up: {decision.followup_description or decision.followup_tool}",
