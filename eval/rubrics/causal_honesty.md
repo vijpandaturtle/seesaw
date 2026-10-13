@@ -3,10 +3,11 @@
 Lens tool results come in three epistemic classes (shared/lens_tools.py):
 
 - **Causal**: `ablation`, `activation_patching`, `head_patching`,
-  `circuit_evaluation`, `steering_vector`, `directional_ablation`,
+  `circuit_evaluation`, `path_patching`, `steering_vector`, `directional_ablation`,
   `feature_clamping` — intervene on the model; support claims like "necessary",
   "causes", "removing X breaks Y".
-- **Estimate**: `attribution_patching`, `feature_attribution` — gradient
+- **Estimate**: `attribution_patching`, `feature_attribution`,
+  `edge_attribution_patching`, `circuit_tracing` — gradient or linear
   approximations of a causal effect; support "is a strong candidate", "is ranked
   highly", never "removing X breaks Y".
 - **Descriptive**: `direct_logit_attribution`, `attention_pattern`, `logit_lens`,

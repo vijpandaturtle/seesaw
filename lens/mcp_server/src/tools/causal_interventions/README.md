@@ -19,7 +19,6 @@ and a thin `run_<name>` wrapper goes in `lens/mcp_server/src/tools/<name>.py`
 (adapts it into an `ExperimentResult`), registered in `TOOL_REGISTRY` and
 catalogued in `shared/lens_tools.py` (tests/test_lens_tools.py checks the two agree).
 
-- **path_patching / edge attribution patching** — Scores connections between components rather than components, giving an actual circuit graph.
 - **causal_mediators** — Systematic selection of which components to treat as candidate causal mediators before patching.
 - **refined_attribution** — Higher-fidelity attribution methods beyond basic attribution patching.
 - **self_repair** — Detects when ablating one component causes others to compensate, masking the true effect.
