@@ -17,7 +17,8 @@ Organized by category, following the taxonomy at learnmechinterp.com:
     ├── metrics.py             — logit diff and recovery, shared by every tool
     ├── visualization/         — descriptive: logit lens, attention pattern, DLA
     ├── causal_interventions/  — ablation, activation / attribution / head patching
-    ├── circuit_finding/       — circuit evaluation (faithfulness vs random circuits)
+    ├── circuit_finding/       — circuit evaluation, edge attribution + path patching,
+    │                            circuit tracing (Neuronpedia attribution graphs)
     ├── black_box/             — counterfactual evaluation (inputs and outputs only)
     ├── probing/               — linear probes and difference-of-means directions
     ├── steering/              — steering vectors, SAE feature clamping
@@ -26,8 +27,9 @@ Organized by category, following the taxonomy at learnmechinterp.com:
     (feature_geometry, hidden_state_decoding, model_diffing, weight_space:
      planned; see lens/mcp_server/src/tools/<category>/README.md)
 
-Gradient-based tools (attribution_patching, feature_attribution) are
-estimates that nominate candidates; the intervention tools verify them.
+Gradient-based tools (attribution_patching, feature_attribution,
+edge_attribution_patching) and circuit_tracing are estimates that nominate
+candidates; the intervention tools verify them.
 
 Needs the `[experiments]` extra (torch, transformer-lens, matplotlib). Nothing
 in this package is imported eagerly by plain `import seesaw` — see
