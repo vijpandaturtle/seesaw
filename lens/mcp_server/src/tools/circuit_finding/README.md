@@ -3,7 +3,7 @@
 Identifying which subgraph of components implements a behavior. induction_heads and IOI are worked examples, not tools, so they're intentionally excluded here.
 
 ## Built in `seesaw.interp.circuit_finding`
-The computation lives in the library; Lens wrappers are not added yet.
+The computation lives in the library; the Lens wrapper is in `lens/mcp_server/src/tools/` and the tool is in `shared/lens_tools.py`.
 - `circuit_evaluation` — faithfulness (only the circuit kept) and necessity (circuit removed), each against random circuits of the same size
 
 ## Not yet implemented

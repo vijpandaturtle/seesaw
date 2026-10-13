@@ -3,7 +3,7 @@
 Superposition & feature extraction. Requires pretrained SAE weights (e.g. via Neuronpedia) as a new dependency, not just a new hook.
 
 ## Built in `seesaw.interp.feature_extraction`
-The computation lives in the library; Lens wrappers are not added yet.
+The computation lives in the library; the Lens wrapper is in `lens/mcp_server/src/tools/` and the tool is in `shared/lens_tools.py`.
 - `sae` — load pretrained SAEs through SAELens (no training); read hook point and Neuronpedia id
 - `neuronpedia` — API client: feature explanations and dashboards (covers feature_dashboards), server-side feature search; responses cached on disk
 - `feature_attribution` — activation × gradient score for every SAE feature, labelled from Neuronpedia
