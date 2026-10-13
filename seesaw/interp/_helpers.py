@@ -1,3 +1,9 @@
+"""Shared math helpers for the interp toolkit. Pure functions, no agent framing.
+
+Moved here unchanged from lens/mcp_server/src/app/helpers.py — nothing about
+these was ever Lens-specific, they just hadn't been given a proper home yet.
+"""
+
 import torch
 from transformer_lens import HookedTransformer
 

@@ -74,6 +74,5 @@ class FollowUpDecision(BaseModel):
     needs_followup: bool
     reason: str
     followup_tool: str | None = None
-    followup_prompts: list[str] = []
     followup_description: str | None = None
     followup_kwargs: dict = {}

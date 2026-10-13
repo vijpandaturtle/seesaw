@@ -26,7 +26,7 @@ APP_NAME = "seesaw-lens"
 
 # gpt2-scale work is comfortable on an A10G. Larger models want more memory for
 # TransformerLens activation caching than for the weights themselves — see
-# MAX_SWEEP_ROWS in app/helpers.py for the knob that bounds it.
+# MAX_SWEEP_ROWS in seesaw/interp/_helpers.py for the knob that bounds it.
 GPU = "A10G"
 
 CACHE_DIR = "/cache"
@@ -44,8 +44,9 @@ image = (
         "pydantic",
     )
     .env({"HF_HOME": CACHE_DIR, "MPLCONFIGDIR": "/tmp/mpl"})
-    # The tools and their helpers, without the agent/LLM layer.
-    .add_local_python_source("lens")
+    # The tools and their helpers, without the agent/LLM layer. Lens's tools
+    # are thin wrappers over seesaw.interp, so the library has to ship too.
+    .add_local_python_source("lens", "seesaw")
 )
 
 volume = modal.Volume.from_name("seesaw-hf-cache", create_if_missing=True)

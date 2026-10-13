@@ -16,7 +16,9 @@ def check_followup(state: dict) -> dict:
     so it has to satisfy the same tool contract — hence the kwargs guide in the
     prompt. Token pairs describe the behaviour under study rather than one
     experiment, so they carry over from the plan unless the follow-up names
-    its own.
+    its own. Prompts always carry over: the token pairs are aligned to them
+    per prompt, and left to choose, the LLM fills prompts with research
+    questions ("What does L9H9 attend to?") that then run as model input.
     """
     result         = state["last_result"]
     followup_count = state.get("followup_count", 0)
@@ -53,7 +55,7 @@ def check_followup(state: dict) -> dict:
             "name":             f"Follow-up: {decision.followup_description or decision.followup_tool}",
             "tool":             decision.followup_tool,
             "model_name":       result["model_name"],
-            "prompts":          decision.followup_prompts or result["prompts"],
+            "prompts":          result["prompts"],
             "what_to_measure":  decision.followup_description or "",
             "hypothesis_tested": "follow-up",
             "expected_outcome": "",

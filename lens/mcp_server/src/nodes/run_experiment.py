@@ -60,6 +60,10 @@ def run_experiment(state: dict) -> dict:
                 model_name=spec["model_name"],
                 prompts=spec["prompts"],
             )
+            # Tools record model.cfg.model_name ("gpt2"), which can differ from
+            # the plan's alias ("gpt2-small"). Follow-ups copy this field, so
+            # keep the plan's name or get_model loads a second copy.
+            result.model_name = spec["model_name"]
 
     icon = "✅" if result.status == "success" else "❌"
     print(f"   {icon} {result.status} | plots={len(result.plot_paths)}")

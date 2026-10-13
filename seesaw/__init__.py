@@ -22,6 +22,14 @@ Public API (everything else in this repo is internal):
     evals.check_offline()
     evals.run_task(evals.load_tasks()["quill_weak_bundle_1"])
 
+    # The interp toolkit directly — no agent framing, just the science
+    # (this is what `experiments` above and Lens's tools both wrap)
+    from seesaw import interp
+    from seesaw.interp.causal_interventions import ablation
+
+    # Hand-coded pathways — expert chains of interp tools, the baseline Lens is judged against
+    from seesaw.pathways import circuit_discovery
+
 Attributes are resolved lazily (PEP 562): `import seesaw` is fast and pulls in
 neither torch nor langgraph until the corresponding function is first touched.
 """
@@ -32,7 +40,7 @@ __version__ = "0.1.0"
 
 __all__ = [
     "run_pipeline", "run_scout", "run_lens", "run_quill",
-    "experiments", "evals", "__version__",
+    "experiments", "evals", "interp", "pathways", "__version__",
 ]
 
 _LAZY = {
@@ -49,7 +57,7 @@ def __getattr__(name: str):
 
         module, attr = _LAZY[name]
         return getattr(importlib.import_module(module), attr)
-    if name in ("experiments", "evals"):
+    if name in ("experiments", "evals", "interp", "pathways"):
         import importlib
 
         return importlib.import_module(f"seesaw.{name}")
