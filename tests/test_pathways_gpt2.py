@@ -32,6 +32,9 @@ pytest.importorskip("transformer_lens")
 from transformer_lens import HookedTransformer  # noqa: E402
 
 from seesaw.interp.causal_interventions import attribution_patching, head_patching  # noqa: E402
+from seesaw.interp.circuit_finding import (  # noqa: E402
+    circuit_tracing, edge_attribution_patching, path_patching,
+)
 from seesaw.interp.feature_extraction.sae import load_sae  # noqa: E402
 from seesaw.pathways import attribute_audit, circuit_discovery, feature_explain  # noqa: E402
 
@@ -89,6 +92,31 @@ def test_attribution_patching_ranks_heads_like_real_patching(gpt2, tmp_path):
     rank = lambda x: x.argsort().argsort().float()  # noqa: E731
     spearman = torch.corrcoef(torch.stack([rank(a), rank(b)]))[0, 1].item()
     assert spearman > 0.8, spearman
+
+
+def test_ioi_wiring_includes_induction_to_s_inhibition(ioi):
+    """Wang et al.: induction heads feed the S-inhibition heads through their values."""
+    edges = ioi.findings["confirmed_edges"]
+    assert "L5H5->L8H6.v" in edges, sorted(edges)
+    assert edges["L9H9->logits"] > 0 and edges["L10H7->logits"] < 0
+
+
+def test_eap_ig_estimates_match_path_patching(gpt2, tmp_path):
+    eap = edge_attribution_patching.compute(gpt2, IOI, IOI_CORR, IO, S, tmp_path, top_k=30, ig_steps=5)
+    edges = [e for e, _ in eap.data["top_edges"]]
+    real = path_patching.compute(gpt2, IOI, IOI_CORR, IO, S, edges, tmp_path)
+    est = torch.tensor([s for _, s in eap.data["top_edges"]])
+    got = torch.tensor([real.data["per_edge"][e] for e in edges])
+    assert torch.corrcoef(torch.stack([est, got]))[0, 1].item() > 0.9
+
+
+def test_circuit_tracing_finds_texas_between_dallas_and_austin(tmp_path):
+    """Ameisen et al. 2025: Dallas → Texas → Austin, a two-hop path in Gemma-2-2B.
+    Reads the public graph Neuronpedia hosts; generates nothing."""
+    r = circuit_tracing.compute(tmp_path, slug="gemma-fact-dallas-austin", top_k=15)
+    assert "Austin" in r.data["target"]
+    labels = [(f["token"], (f["explanation"] or "").lower()) for f in r.data["top_features"]]
+    assert any(tok == " Dallas" and "texas" in label for tok, label in labels), labels
 
 
 def test_gender_bias_is_found(gpt2, tmp_path):

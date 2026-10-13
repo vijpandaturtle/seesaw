@@ -23,6 +23,10 @@ from seesaw.interp.black_box import counterfactual  # noqa: E402
 from seesaw.interp.causal_interventions import (  # noqa: E402
     ablation, attribution_patching, head_patching,
 )
+from seesaw.interp.circuit_finding import (  # noqa: E402
+    circuit_tracing, edge_attribution_patching, path_patching,
+)
+from seesaw.interp.circuit_finding._edges import parse_edge  # noqa: E402
 from seesaw.interp.feature_extraction import feature_attribution, neuronpedia  # noqa: E402
 from seesaw.interp.metrics import logit_diff, recovery  # noqa: E402
 from seesaw.interp.model_editing import directional_ablation  # noqa: E402
@@ -103,6 +107,78 @@ def test_joint_patching_adds_up_on_a_linear_model(linear_model, tmp_path):
     heads = [f"L0H{h}" for h in range(linear_model.cfg.n_heads)]
     r = head_patching.compute(linear_model, PROMPTS, CORRUPTED, POS, NEG, heads, tmp_path)
     assert r.data["joint_recovery"] == pytest.approx(sum(r.data["per_head"].values()), abs=1e-3)
+
+
+def test_eap_is_exact_for_edges_into_the_logits_of_a_linear_model(linear_model, tmp_path):
+    # Logits are linear in the final residual stream here, so an edge into
+    # "logits" has no nonlinearity between patch and metric.
+    eap = edge_attribution_patching.compute(linear_model, PROMPTS, CORRUPTED, POS, NEG, tmp_path,
+                                            top_k=1000, ig_steps=0)
+    to_logits = {e: s for e, s in eap.data["top_edges"] if e.endswith("->logits")}
+    real = path_patching.compute(linear_model, PROMPTS, CORRUPTED, POS, NEG, list(to_logits), tmp_path)
+    assert len(to_logits) == 1 + linear_model.cfg.n_heads          # embed + every head
+    for edge, score in to_logits.items():
+        assert score == pytest.approx(real.data["per_edge"][edge], abs=1e-3), edge
+
+
+def test_edge_tools_leave_the_model_as_they_found_it(model, tmp_path):
+    before = (model.cfg.use_split_qkv_input, model.cfg.use_hook_mlp_in)
+    edge_attribution_patching.compute(model, PROMPTS, CORRUPTED, POS, NEG, tmp_path, ig_steps=2)
+    path_patching.compute(model, PROMPTS, CORRUPTED, POS, NEG, ["L0H1->L1H2.v"], tmp_path)
+    assert (model.cfg.use_split_qkv_input, model.cfg.use_hook_mlp_in) == before
+
+
+def test_edges_must_point_forward(model):
+    parse_edge("L0H1->L1H2.q", model)
+    parse_edge("MLP0->L1H2.k", model)
+    for bad in ["L1H2->L0H1.q", "L1H2->L1H3.v", "MLP1->MLP1", "L9H9->logits"]:
+        with pytest.raises(ValueError):
+            parse_edge(bad, model)
+
+
+def test_circuit_tracing_influence_and_error_share(monkeypatch, tmp_path):
+    """A hand-built graph: embed → feature A → target, embed → error node → target.
+
+    Influence is normalised per node, so A and the error node split the
+    target's influence by their edge weights (3:1), and A passes all of its
+    share on to the embedding.
+    """
+    nodes = [
+        {"node_id": "E_1_0", "feature_type": "embedding", "layer": "E", "ctx_idx": 0, "feature": 1},
+        {"node_id": "1_100005_0", "feature_type": "cross layer transcoder", "layer": "1",
+         "ctx_idx": 0, "feature": 100005, "clerp": "feature A"},
+        {"node_id": "err_0", "feature_type": "mlp reconstruction error", "layer": "1", "ctx_idx": 0, "feature": 0},
+        {"node_id": "2_7_0", "feature_type": "logit", "layer": "2", "ctx_idx": 0, "feature": 7,
+         "is_target_logit": True, "token_prob": 0.9, "clerp": 'Output " x"'},
+    ]
+    links = [
+        {"source": "E_1_0", "target": "1_100005_0", "weight": 2.0},
+        {"source": "E_1_0", "target": "err_0", "weight": 1.0},
+        {"source": "1_100005_0", "target": "2_7_0", "weight": 3.0},
+        {"source": "err_0", "target": "2_7_0", "weight": -1.0},
+    ]
+    graph = {"metadata": {"prompt": "x", "prompt_tokens": ["x"], "scan": "m"}, "nodes": nodes,
+             "links": links, "source_set": None}
+    monkeypatch.setattr(neuronpedia, "get_graph", lambda model_id, slug: graph)
+    r = circuit_tracing.compute(tmp_path, slug="any", model_id="m", explain=False)
+    (top,) = r.data["top_features"]
+    assert top["explanation"] == "feature A" and top["influence"] == pytest.approx(0.75)
+    # influence mass: A 0.75, error 0.25, embed 1.0 → error share 0.25 / 2.0
+    assert r.data["error_influence_share"] == pytest.approx(0.125)
+    assert r.data["target"] == 'Output " x"'
+
+
+def test_circuit_tracing_will_not_publish_unless_told(monkeypatch, tmp_path):
+    def missing(model_id, slug):
+        raise neuronpedia.NeuronpediaError("not found")
+
+    def never(*a, **k):
+        raise AssertionError("generate_graph must not be called without allow_generate")
+
+    monkeypatch.setattr(neuronpedia, "get_graph", missing)
+    monkeypatch.setattr(neuronpedia, "generate_graph", never)
+    with pytest.raises(neuronpedia.NeuronpediaError, match="publishes"):
+        circuit_tracing.compute(tmp_path, prompt="When Mary and John went", model_id="gemma-2-2b")
 
 
 def test_ablation_on_a_shortlist_matches_the_full_sweep(model, tmp_path):
