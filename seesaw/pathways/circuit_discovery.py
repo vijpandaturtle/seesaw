@@ -15,6 +15,11 @@ Measure → nominate → verify → evaluate:
 4. Evaluate — mean-ablate everything outside the confirmed heads and see how
    much behaviour survives (faithfulness), against random circuits of the
    same size.
+5. Wire (with corrupted prompts) — which connections carry it. Edge
+   attribution patching (EAP-IG) ranks every sender → receiver edge; path
+   patching measures the top EDGE_K, and an edge is confirmed when patching
+   it alone moves the logit diff by at least EDGE_CONFIRM of the gap, in
+   either direction. The result is a wiring diagram, not just a head list.
 
 Head roles in `findings`:
 - confirmed_writers — confirmed, and DLA says they write the answer (name movers in IOI).
@@ -36,7 +41,9 @@ from transformer_lens import HookedTransformer
 
 from seesaw.interp._helpers import parse_head, tokens_to_ids, top_heads
 from seesaw.interp.causal_interventions import ablation, attribution_patching, head_patching
-from seesaw.interp.circuit_finding import circuit_evaluation
+from seesaw.interp.circuit_finding import (
+    circuit_evaluation, edge_attribution_patching, path_patching,
+)
 from seesaw.interp.metrics import logit_diff
 from seesaw.interp.visualization import direct_logit_attribution
 
@@ -55,6 +62,11 @@ CONFIRM_EFFECT = 0.10
 # Faithfulness needed for "circuit_found", and how far above random circuits it must sit.
 FAITHFUL_MIN = 0.5
 RANDOM_MARGIN = 0.25
+# Edges ranked by EAP-IG and then path-patched, and the share of the gap one
+# edge alone must move (either sign) to count as part of the wiring.
+EDGE_K = 30
+EDGE_CONFIRM = 0.05
+EAP_IG_STEPS = 5
 
 
 def run(
@@ -174,4 +186,27 @@ def run(
         result.verdict = "circuit_found"
     else:
         result.verdict = "partial_circuit"
+
+    # ── 5. Wire ───────────────────────────────────────────────────────────────
+    if corrupted_prompts:
+        eap = edge_attribution_patching.compute(
+            model, prompts, corrupted_prompts, positive_tokens, negative_tokens, output_dir,
+            top_k=EDGE_K, ig_steps=EAP_IG_STEPS)
+        result.steps["edge_attribution_patching"] = eap
+        pp = path_patching.compute(
+            model, prompts, corrupted_prompts, positive_tokens, negative_tokens,
+            [e for e, _ in eap.data["top_edges"]], output_dir)
+        result.steps["path_patching"] = pp
+        confirmed_edges = {e: r for e, r in pp.data["per_edge"].items() if abs(r) >= EDGE_CONFIRM}
+        result.findings["confirmed_edges"] = dict(sorted(confirmed_edges.items(), key=lambda kv: -abs(kv[1])))
+        between = {e: r for e, r in confirmed_edges.items()
+                   if e.split("->")[0] in confirmed and e.split("->")[1].split(".")[0] in confirmed}
+        result.evidence.append(
+            f"{len(confirmed_edges)} of the top {len(pp.data['per_edge'])} edges by EAP-IG move the "
+            f"logit diff by at least {EDGE_CONFIRM:.0%} when patched alone.")
+        if between:
+            top = sorted(between.items(), key=lambda kv: -abs(kv[1]))[:4]
+            result.evidence.append(
+                "Connections between confirmed heads: "
+                + ", ".join(f"{e} {r:+.0%}" for e, r in top) + ".")
     return result
