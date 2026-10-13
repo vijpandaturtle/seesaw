@@ -145,7 +145,7 @@ The REPL supports:
 <anything else>             sent to the agent, which may call MCP tools
 ```
 
-Tools exposed: `logit_lens`, `attention_pattern`, `ablation`, `activation_patching`, `direct_logit_attribution` — each independently callable with a `model_name` and prompts, not just through the full workflow.
+Tools exposed: `logit_lens`, `attention_pattern`, `ablation`, `activation_patching`, `direct_logit_attribution` each have their own MCP tool; `run_tool` runs any other tool in the catalog ([`shared/lens_tools.py`](shared/lens_tools.py)) by name, with its arguments as `tool_kwargs`. All are independently callable with a `model_name` and prompts, not just through the full workflow.
 Resource: `results://last-bundle`. Prompt: `tool_selection_guide`.
 
 ### Quill
@@ -310,7 +310,7 @@ jobs.
 | Service | Runs | Why there |
 |---|---|---|
 | **Vercel** | The dashboard (`seesaw-web`) | Reads and writes the job store; never executes an agent |
-| **Modal** | Scout, Quill, Lens's graph, and the five experiment tools | A stage takes minutes to an hour, well past any serverless request limit |
+| **Modal** | Scout, Quill, Lens's graph, and the experiment tools | A stage takes minutes to an hour, well past any serverless request limit |
 | **Neon** | The job store | Vercel and Modal are different machines, so a local SQLite file can't be shared |
 
 The dashboard inserts a queued row and calls Modal's `start` endpoint, which
@@ -355,7 +355,7 @@ modal secret create seesaw-secrets \
 ### 3. Modal apps
 
 ```bash
-modal deploy lens/modal_app.py          # GPU: the five experiment tools
+modal deploy lens/modal_app.py          # GPU: the experiment tools
 modal deploy orchestrator/modal_app.py  # CPU: Scout, Quill, Lens's graph
 ```
 
