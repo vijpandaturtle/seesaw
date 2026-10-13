@@ -2,7 +2,7 @@
 
     modal deploy lens/modal_app.py
 
-Only the five experiment tools run here — the forward passes. Lens's graph
+Only the experiment tools run here — the forward passes. Lens's graph
 (plan parsing, result interpretation, follow-up decisions) stays on the machine
 running the worker, because that part is LLM calls and costs nothing to keep
 local. So this container needs no API keys.
@@ -38,6 +38,7 @@ image = (
         "numpy",
         "matplotlib",
         "transformer-lens",
+        "sae-lens",          # feature_attribution / feature_clamping load SAEs
         # Pulled in by the import chain rather than by the tools themselves:
         # config/settings.py calls load_dotenv, models/schemas.py uses pydantic.
         "python-dotenv",

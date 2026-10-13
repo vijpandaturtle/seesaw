@@ -1,9 +1,12 @@
 """MCP tool registration for Lens.
 
-Each TransformerLens experiment (logit lens, attention patterns, ablation,
-activation patching, direct logit attribution) is its own MCP tool, so a
-client can discover and call them one at a time rather than going through
-the full research-plan workflow. The orchestrator uses the workflow graph
+The five original experiments (logit lens, attention patterns, ablation,
+activation patching, direct logit attribution) are each their own MCP tool,
+with typed arguments. Every other Lens tool — patching on a shortlist,
+circuit evaluation, probes, steering, SAE features — goes through `run_tool`,
+which takes the tool's name and its arguments and validates them exactly as
+the workflow does. Either way a client can call experiments one at a time
+rather than going through the full research-plan workflow. The orchestrator uses the workflow graph
 directly for the automated pipeline; these tools are for ad-hoc / external
 use (e.g. calling Lens from Claude Desktop or another agent).
 """
@@ -16,6 +19,8 @@ from fastmcp import FastMCP
 from ..app.model_session import get_model
 from ..app.sandbox import run_in_sandbox
 from ..tools import (
+    TOOL_REGISTRY,
+    normalize_tool_kwargs,
     run_ablation,
     run_activation_patching,
     run_attention_pattern,
@@ -192,5 +197,38 @@ def register_mcp_tools(mcp: FastMCP) -> None:
                 "pos": pos,
             },
             experiment_name="Direct Logit Attribution",
+        )
+        return _to_json(result)
+
+    @mcp.tool()
+    def run_tool(model_name: str, tool: str, prompts: list[str], tool_kwargs: dict | None = None) -> str:
+        """Run any Lens tool by name. The tool_selection_guide prompt lists them.
+
+        Use this for the tools without their own MCP entry: attribution_patching,
+        head_patching, circuit_evaluation, counterfactual, linear_probe,
+        steering_vector, directional_ablation, feature_search,
+        feature_attribution, feature_clamping.
+
+        Args:
+            model_name: TransformerLens model name (e.g. 'gpt2').
+            tool: Tool name, e.g. 'head_patching'.
+            prompts: Input prompts.
+            tool_kwargs: The tool's other arguments, e.g. {"corrupted_prompts": [...],
+                "positive_tokens": [" Mary"], "negative_tokens": [" John"], "heads": ["L9H9"]}.
+
+        Returns:
+            JSON ExperimentResult, or a JSON error naming missing arguments.
+        """
+        if tool not in TOOL_REGISTRY:
+            return json.dumps({"status": "failed", "error": f"unknown tool {tool!r}; "
+                               f"available: {sorted(TOOL_REGISTRY)}"})
+        kwargs, missing, dropped = normalize_tool_kwargs(tool, tool_kwargs or {}, len(prompts))
+        if missing:
+            return json.dumps({"status": "failed", "error": f"{tool} needs {missing}",
+                               "ignored": dropped})
+        result = run_in_sandbox(
+            TOOL_REGISTRY[tool],
+            tool_kwargs={"model": get_model(model_name), "prompts": prompts, **kwargs},
+            experiment_name=tool, tool=tool, model_name=model_name, prompts=prompts,
         )
         return _to_json(result)

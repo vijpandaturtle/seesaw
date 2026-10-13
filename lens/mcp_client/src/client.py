@@ -2,7 +2,8 @@
 
 Runs the Lens FastMCP server in-memory (same process) and connects to it
 via a ReAct agent that can call any registered tool: logit_lens,
-attention_pattern, ablation, activation_patching, direct_logit_attribution.
+attention_pattern, ablation, activation_patching, direct_logit_attribution,
+and run_tool for the rest of the catalog in shared/lens_tools.py.
 
 Usage:
     python -m lens.mcp_client.src.client
