@@ -7,8 +7,10 @@ The real computation lives in `seesaw/interp/causal_interventions/` (pure
 functions, no agent framing); this folder's sibling files (`../ablation.py`,
 `../activation_patching.py`) are the thin wrappers that call into the library
 and adapt the result for Lens's agent loop.
-- `ablation` (built)
+- `ablation` (built; zero / mean / resample, full sweep or a shortlist of heads)
 - `activation_patching` (built)
+- `attribution_patching` (library only) — every head's and MLP's patching effect estimated from one backward pass; nominates
+- `head_patching` (library only) — real patching of a shortlist of heads, alone and together; verifies
 
 ## Not yet implemented
 New techniques here get built the same way: the real logic goes in
@@ -16,7 +18,7 @@ New techniques here get built the same way: the real logic goes in
 and a thin `run_<name>` wrapper goes in `lens/mcp_server/src/tools/<name>.py`
 (adapts it into an `ExperimentResult` and gets registered as an MCP tool).
 
-- **attribution_path_patching** — Approximates activation patching in one backward pass — the tool that makes automated circuit search (ACDC-style) tractable.
+- **path_patching / edge attribution patching** — Scores connections between components rather than components, giving an actual circuit graph.
 - **causal_mediators** — Systematic selection of which components to treat as candidate causal mediators before patching.
 - **refined_attribution** — Higher-fidelity attribution methods beyond basic attribution patching.
 - **self_repair** — Detects when ablating one component causes others to compensate, masking the true effect.
