@@ -19,13 +19,7 @@ import pytest
 
 from conftest import require_tool
 
-LENS_TOOLS = {
-    "logit_lens",
-    "attention_pattern",
-    "direct_logit_attribution",
-    "ablation",
-    "activation_patching",
-}
+from shared.lens_tools import LENS_TOOLS
 
 
 @pytest.fixture(scope="session")

@@ -16,16 +16,15 @@ from __future__ import annotations
 
 import re
 
+from shared.lens_tools import LENS_TOOLS, names
+
 from .base import GraderResult, GraderType, field, judge
 
 AGENT = "lens"
 
-# Mirrors lens/mcp_server/src/tools/__init__.py::TOOL_REGISTRY. Flat constant so
-# this module needn't import the tools package (which pulls in torch).
-VALID_LENS_TOOLS = {
-    "logit_lens", "attention_pattern", "direct_logit_attribution",
-    "ablation", "activation_patching",
-}
+# The torch-free catalog, which tests/test_lens_tools.py keeps equal to Lens's
+# TOOL_REGISTRY — so this module needn't import the tools package.
+VALID_LENS_TOOLS = set(LENS_TOOLS)
 
 
 def _top_head_names(data: dict, n: int = 5) -> list[str]:
@@ -190,8 +189,9 @@ def interpretation_faithfulness(result) -> GraderResult:
 
 def causal_correlational_honesty(result) -> GraderResult:
     """Does the summary reserve causal language ('necessary', 'causes') for causal
-    tools (ablation, activation_patching), rather than reading causation into DLA /
-    attention (which are correlational)? Discipline-specific failure mode."""
+    tools (ablation, patching, clamping, ...), rather than reading causation into
+    descriptive tools (DLA, attention, probes) or gradient estimates
+    (attribution_patching, feature_attribution)? Discipline-specific failure mode."""
     from pydantic import BaseModel
 
     class Grade(BaseModel):
@@ -200,8 +200,10 @@ def causal_correlational_honesty(result) -> GraderResult:
 
     g: "Grade" = judge(
         "A summary should only make causal claims ('X is necessary/causes Y') when backed by a "
-        "causal tool (ablation, activation_patching). direct_logit_attribution and "
-        "attention_pattern are correlational — they show association, not necessity. Given the "
+        f"causal tool ({', '.join(names('causal'))}). Descriptive tools "
+        f"({', '.join(names('descriptive'))}) show association, not necessity. Estimates "
+        f"({', '.join(names('estimate'))}) are gradient approximations that rank candidates; "
+        "calling their numbers causal effects is also unsupported. Given the "
         "tool used and the summary, does the summary make an unsupported causal claim?\n\n"
         f"TOOL: {field(result, 'tool')}\n\nSUMMARY: {field(result, 'summary', '')}",
         Grade,

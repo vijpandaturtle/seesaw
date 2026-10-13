@@ -16,6 +16,8 @@ import sys
 import tempfile
 from pathlib import Path
 
+from shared.lens_tools import LENS_TOOLS as _LENS_CATALOG
+
 from ..graders import GraderResult, GraderType, field as read
 from ..graders.base import judge
 from ..tasks import GraderSpec, Task
@@ -25,9 +27,8 @@ EVAL_DIR = Path(__file__).resolve().parents[1]
 TESTS_DIR = EVAL_DIR / "tests"
 REPO_ROOT = EVAL_DIR.parent
 
-# Mirrors lens TOOL_REGISTRY (kept flat to avoid the torch import).
-LENS_TOOLS = {"logit_lens", "attention_pattern", "direct_logit_attribution",
-              "ablation", "activation_patching"}
+# Lens's tools, from the torch-free catalog (avoids importing the tools package).
+LENS_TOOLS = set(_LENS_CATALOG)
 
 
 def _res(criterion: str, agent: str, kind: GraderType, **kw) -> GraderResult:
