@@ -67,7 +67,9 @@ __LENS_TOOL_TABLE__
 Descriptive tools show association; estimates rank candidates cheaply; only causal tools
 show a component is necessary. A strong plan nominates with a cheap tool and verifies with a
 causal one (e.g. attribution_patching -> head_patching -> circuit_evaluation;
+edge_attribution_patching -> path_patching;
 counterfactual -> linear_probe -> directional_ablation; feature_attribution -> feature_clamping).
+circuit_tracing reads attribution graphs from Neuronpedia for gemma-2-2b only.
 If the question needs something none of these do, say so plainly in the plan.
 
 ## Scout Tool Guide

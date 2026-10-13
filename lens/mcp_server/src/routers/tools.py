@@ -205,7 +205,8 @@ def register_mcp_tools(mcp: FastMCP) -> None:
         """Run any Lens tool by name. The tool_selection_guide prompt lists them.
 
         Use this for the tools without their own MCP entry: attribution_patching,
-        head_patching, circuit_evaluation, counterfactual, linear_probe,
+        head_patching, circuit_evaluation, edge_attribution_patching,
+        path_patching, circuit_tracing, counterfactual, linear_probe,
         steering_vector, directional_ablation, feature_search,
         feature_attribution, feature_clamping.
 

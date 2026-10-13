@@ -49,6 +49,12 @@ LENS_TOOLS: dict[str, LensTool] = {
     "feature_attribution": LensTool(
         "estimate", "every SAE feature's contribution to the logit diff (activation x gradient), labelled from "
                     "Neuronpedia; nominates features for feature_clamping"),
+    "edge_attribution_patching": LensTool(
+        "estimate", "every sender->receiver edge's patching effect (EAP-IG): which connections between heads "
+                    "carry the behaviour; nominates edges for path_patching"),
+    "circuit_tracing": LensTool(
+        "estimate", "the attribution graph for one prompt from Neuronpedia (gemma-2-2b only): top transcoder "
+                    "features by influence on the predicted token, and the share through error nodes"),
     # ── causal ───────────────────────────────────────────────────────────────
     "ablation": LensTool(
         "causal", "zero / mean / resample-ablate heads (all, or a `heads` list) and measure the drop in logit diff"),
@@ -59,6 +65,8 @@ LENS_TOOLS: dict[str, LensTool] = {
     "circuit_evaluation": LensTool(
         "causal", "how much behaviour a set of heads keeps (faithfulness) and removes (necessity), vs random "
                   "head sets"),
+    "path_patching": LensTool(
+        "causal", "patch named edges ('L8H6->L9H9.q') from clean into corrupted, each alone and all together"),
     "steering_vector": LensTool(
         "causal", "add the prompts-minus-counterfactuals direction to the counterfactual prompts at a layer and "
                   "sweep its strength"),

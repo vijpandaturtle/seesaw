@@ -67,7 +67,8 @@ __LENS_TOOL_LIST__
 
 Prefer a causal tool when the gap is an unverified claim: a head named by DLA or
 attribution_patching → head_patching or ablation with `heads`; a set of heads →
-circuit_evaluation; a probe direction → directional_ablation; SAE features → feature_clamping.
+circuit_evaluation; an edge from edge_attribution_patching → path_patching; a probe direction →
+directional_ablation; SAE features → feature_clamping.
 
 For each follow-up:
 - Choose the tool that most directly tests the gap or weakness

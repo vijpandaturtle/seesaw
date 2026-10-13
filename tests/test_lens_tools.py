@@ -7,8 +7,9 @@ or the graders reject ones it can — so they're checked against each other.
 The dispatch test sends each tool through normalize_tool_kwargs and
 run_in_sandbox exactly as run_experiment does, on a tiny random model, so a
 wrapper whose signature, kwargs contract or result shape is wrong fails here
-rather than mid-pipeline. The SAE tools are left out (they need a published
-SAE for the model); tests/test_pathways_gpt2.py exercises the library side.
+rather than mid-pipeline. The SAE tools and circuit_tracing are left out
+(they need a published SAE, or Neuronpedia's graph service);
+tests/test_pathways_gpt2.py exercises them.
 """
 
 from __future__ import annotations
@@ -47,8 +48,10 @@ PLAN_KWARGS = {
     "negative_tokens":   [" John"],
     "corrupted_prompts": CORRUPTED,         # routed to counterfactual_prompts where needed
     "heads":             ["L1H2", "L0H1"],
+    "edges":             ["L0H1->L1H2.q", "L1H2->logits"],
 }
-SAE_TOOLS = {"feature_search", "feature_attribution", "feature_clamping"}
+# Need a published SAE for the model, or Neuronpedia's graph service.
+EXTERNAL_TOOLS = {"feature_search", "feature_attribution", "feature_clamping", "circuit_tracing"}
 
 
 def test_catalog_matches_registry():
@@ -63,7 +66,7 @@ def model():
     return HookedTransformer(cfg).eval()
 
 
-@pytest.mark.parametrize("tool", [t for t in LENS_TOOLS if t not in SAE_TOOLS])
+@pytest.mark.parametrize("tool", [t for t in LENS_TOOLS if t not in EXTERNAL_TOOLS])
 def test_every_tool_runs_through_dispatch(tool, model, tmp_path):
     kwargs, missing, _ = normalize_tool_kwargs(tool, PLAN_KWARGS, len(PROMPTS))
     assert not missing, f"{tool} needs {missing}, which a plan using the documented names would provide"

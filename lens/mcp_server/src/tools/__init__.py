@@ -13,6 +13,8 @@ from .linear_probe import run_linear_probe
 from .steering_vector import run_steering_vector
 from .directional_ablation import run_directional_ablation
 from .features import run_feature_attribution, run_feature_clamping, run_feature_search
+from .edges import run_edge_attribution_patching, run_path_patching
+from .circuit_tracing import run_circuit_tracing
 
 # Keys must match shared/lens_tools.py, the catalog Scout, Quill and the
 # graders read (tests/test_lens_tools.py checks they agree).
@@ -25,10 +27,13 @@ TOOL_REGISTRY: dict = {
     "counterfactual":           run_counterfactual,
     "attribution_patching":     run_attribution_patching,
     "feature_attribution":      run_feature_attribution,
+    "edge_attribution_patching": run_edge_attribution_patching,
+    "circuit_tracing":          run_circuit_tracing,
     "ablation":                 run_ablation,
     "activation_patching":      run_activation_patching,
     "head_patching":            run_head_patching,
     "circuit_evaluation":       run_circuit_evaluation,
+    "path_patching":            run_path_patching,
     "steering_vector":          run_steering_vector,
     "directional_ablation":     run_directional_ablation,
     "feature_clamping":         run_feature_clamping,
@@ -50,6 +55,8 @@ ARG_HELP = {
                               "length, e.g. 'The nurse said that' -> 'The engineer said that'",
     "heads":             "heads to test, named 'L<layer>H<head>', e.g. ['L9H9', 'L10H7'] — take "
                          "them from an earlier sweep's top_heads",
+    "edges":             "edges to test, written 'sender->receiver', e.g. ['L8H6->L9H9.q', "
+                         "'L9H9->logits'] — take them from edge_attribution_patching's top_edges",
     "features":          "SAE feature indices to switch off, e.g. [658, 16308] — take them from "
                          "feature_attribution's top_features, and use its layer",
 }
@@ -71,6 +78,8 @@ KWARG_ALIASES = {
     "heads_to_test":     "heads",
     "circuit":           "heads",
     "feature_indices":   "features",
+    "connections":       "edges",
+    "edges_to_test":     "edges",
 }
 
 # The second prompt set goes by two names: patching tools say corrupted_prompts,
@@ -204,6 +213,9 @@ __all__ = [
     "run_feature_search",
     "run_feature_attribution",
     "run_feature_clamping",
+    "run_edge_attribution_patching",
+    "run_path_patching",
+    "run_circuit_tracing",
     "TOOL_REGISTRY",
     "ARG_HELP",
     "KWARG_ALIASES",

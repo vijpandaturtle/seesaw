@@ -12,6 +12,7 @@ from .settings import (
     TL_REFACTOR_FACTORED_ATTN,
     SANDBOX_TIMEOUT,
     MAX_FOLLOWUPS,
+    NEURONPEDIA_PUBLISH,
 )
 
 __all__ = [
@@ -28,4 +29,5 @@ __all__ = [
     "TL_REFACTOR_FACTORED_ATTN",
     "SANDBOX_TIMEOUT",
     "MAX_FOLLOWUPS",
+    "NEURONPEDIA_PUBLISH",
 ]

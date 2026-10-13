@@ -38,3 +38,9 @@ SANDBOX_TIMEOUT: int = 300   # seconds — ablation/patching can be slow on CPU
 
 # ── Workflow ──────────────────────────────────────────────────────────────────
 MAX_FOLLOWUPS: int = 2       # max auto-generated follow-up experiments per run
+
+# ── Neuronpedia ───────────────────────────────────────────────────────────────
+# circuit_tracing generates attribution graphs on Neuronpedia, which stores the
+# graph and its prompt under a public URL. Off unless SEESAW_NEURONPEDIA_PUBLISH=1:
+# without it, circuit_tracing only reads graphs that already exist.
+NEURONPEDIA_PUBLISH: bool = os.getenv("SEESAW_NEURONPEDIA_PUBLISH", "") == "1"
