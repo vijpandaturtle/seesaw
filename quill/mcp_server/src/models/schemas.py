@@ -69,7 +69,7 @@ class ResearchGap(BaseModel):
 class FollowUpSpec(BaseModel):
     """Concrete experiment spec that Lens can execute directly."""
     name: str
-    tool: str              # logit_lens | attention_pattern | ablation | activation_patching | direct_logit_attribution
+    tool: str              # a Lens tool name, one of shared/lens_tools.py::LENS_TOOLS
     rationale: str         # why this follow-up is needed
     what_to_measure: str
     hypothesis: str
