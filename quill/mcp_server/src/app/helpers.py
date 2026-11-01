@@ -12,6 +12,10 @@ def format_result_for_context(result: ExperimentResult) -> str:
         "",
         f"**Lens summary**: {result.summary or '(no summary)'}",
     ]
+    if result.tool_kwargs:
+        lines += ["", "**Ran with**:"]
+        for k, v in result.tool_kwargs.items():
+            lines.append(f"  - `{k}`: {str(v)[:200]}")
     if result.data:
         lines += ["", "**Key measurements**:"]
         for k, v in list(result.data.items())[:8]:

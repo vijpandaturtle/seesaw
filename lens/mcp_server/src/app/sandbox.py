@@ -26,7 +26,9 @@ def run_in_sandbox(
     memory and its share of the GPU until it returns on its own. Bounding
     that needs process isolation (the tool would have to load the model in
     the child rather than receive it), which is the change to make before
-    Lens runs anywhere metered.
+    Lens runs anywhere metered. Until then, run_experiment retires the model
+    after a timeout (model_session.retire_model): the stuck thread fails at
+    its next forward call, and later experiments get a fresh copy.
 
     Args:
         tool_fn: The tool function to call.

@@ -12,5 +12,5 @@ The computation lives in the library; the Lens wrapper is in `lens/mcp_server/sr
 ## Not yet implemented
 - **entity_binding** — Techniques for how a model tracks which entity a given piece of information belongs to.
 - **universality** — Testing whether the same circuit/algorithm recurs across different models.
-- **multimodal_interpretability** — Circuit-finding techniques applied to vision/multimodal models — depends on the nnsight backend decision (Part 8).
+- **multimodal_interpretability** — Circuit finding (edges, circuit evaluation) on vision-language models. The lever backend (`seesaw.vlm`) has layer-level patching and ablation so far, not head- or edge-level circuits.
 - **copy_suppression** — The specific mechanism by which some heads suppress naive copying behavior.

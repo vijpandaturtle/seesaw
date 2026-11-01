@@ -83,6 +83,29 @@ report, report_path = run_quill(bundle_path)
 
 `scout_client.py` and `lens_client.py` call the agent's LangGraph workflow **in-process** — they do not go through MCP. This is the fast path used by the orchestrator itself.
 
+### Jobs from the terminal
+
+`seesaw run` and the orchestrator above run in your terminal and record nothing. `seesaw jobs` goes through the job store instead, so a job submitted here shows in the dashboard and one queued from the dashboard can be approved here.
+
+```bash
+seesaw jobs submit "Does LLaVA use the image for counting?" --model llava-hf/llava-interleave-qwen-0.5b-hf --follow
+```
+
+| Command | Does |
+|---|---|
+| `submit "<question>"` | Create a job and start its Scout stage. `--model`, `--auto-approve`, `--follow` |
+| `list` | Recent jobs, newest first. `--json` for scripts |
+| `show <id>` | Status, artifact paths, error, and what to do next |
+| `approve <id>` | Clear the approval gate and start the next stage. Refused unless the job is still awaiting approval |
+| `retry <id>` | Re-run a failed stage. Refused unless the job is still failed |
+| `cancel <id>` | Stop the job |
+| `logs <id>` | Worker output. `-f` streams until the job stops |
+| `open <id>` | Open the job in the dashboard at `SEESAW_WEB_URL` (default `http://localhost:3000`) |
+
+`--follow` streams the log and, at an approval gate, asks whether to approve. Ctrl-C stops watching, not the job: the worker runs detached.
+
+Who runs a stage is picked as the dashboard picks it: the Modal function when `MODAL_RUN_STAGE_URL` is set, otherwise a detached local worker writing to `outputs/job_logs/<id>.log`. `--runner queue` starts nothing and leaves the job for `python -m orchestrator.src.worker --poll`. Whatever `DATABASE_URL` points at is the store the commands use, so with the production URL in `.env`, `submit` queues a real job.
+
 ---
 
 ## Running Each Agent Standalone
@@ -171,6 +194,41 @@ Tool exposed: `critique_experiment_bundle` (takes the results bundle as a JSON s
 Resource: `system://status`. Prompt: `critique_instructions`.
 
 *(Quill doesn't yet have an interactive `mcp_client/` REPL — only Lens does. Copy `lens/mcp_client/` as a template if you need one.)*
+
+---
+
+## Interp Backends: seesaw and lever
+
+Lens runs experiments through one of two libraries, chosen per run with
+`SEESAW_INTERP_BACKEND`:
+
+| Backend | Models | Library | Tools |
+|---|---|---|---|
+| `seesaw` (default) | TransformerLens text models (GPT-2, Pythia, Gemma for circuit tracing) | `seesaw.interp` | 18: patching, circuits, probes, steering, SAE features |
+| `lever` | Vision-language models: LLaVA, Qwen2.5-VL / Qwen3-VL, CLIP | `seesaw.vlm`, on [lever](https://github.com/vijpandaturtle/lever-interp) | 6: logit lens, vision ablation, image-token ablation, activation patching, CLIP direct effects, CLIP head ablation |
+
+```bash
+uv pip install -e ".[experiments,lever]"
+SEESAW_INTERP_BACKEND=lever seesaw run "Which LM layers read the written word in a typographic attack on LLaVA?"
+```
+
+The switch changes everything that lists tools: Scout's plan template, Lens's
+planner and follow-ups, Quill's follow-up prompt and the MCP `run_tool`, all
+read the active catalog in `shared/lens_tools.py`. It's independent of
+`SEESAW_LENS_BACKEND`, which controls *where* experiments run; the lever
+backend runs locally only for now.
+
+**Images.** lever experiments take `images` (and `corrupted_images` for
+activation patching), one per prompt. A plan can give a file path (relative
+paths resolve against `SEESAW_IMAGE_DIR`), an http(s) URL, or a synthetic
+image: `text:<words>`, `solid:<colour>`, or any of those plus `+text:<words>`
+to stamp words on it, which is a typographic attack. See `seesaw/vlm/inputs.py`.
+
+**Answer tokens** for chat VLMs have no leading space (`"Yes"`, not `" Yes"`).
+For the CLIP tools, `prompts` are the candidate labels.
+
+**Not covered:** the eval suite's tasks and graders are GPT-2 circuit tasks
+and stay on the seesaw catalog, so evals don't score lever runs yet.
 
 ---
 
@@ -416,6 +474,8 @@ awaiting_approval`.
 | `SEESAW_DB_PATH` | local, CI | Force SQLite even when `DATABASE_URL` is set |
 | `SEESAW_ARTIFACTS_DIR` | Modal image | Redirects all three agents' outputs to the volume |
 | `SEESAW_LENS_BACKEND` | Modal runner | `modal` sends experiments to the GPU app; default `local` |
+| `SEESAW_INTERP_BACKEND` | local | `lever` runs Lens on vision-language models; default `seesaw` (see [Interp Backends](#interp-backends-seesaw-and-lever)) |
+| `SEESAW_IMAGE_DIR` | local | Where relative image paths in a plan resolve (lever backend) |
 | `RUNNER_KEY` | Modal secret | Guards the endpoint that starts jobs |
 | `WRITE_KEY` | Vercel | Gates dashboard writes |
 | `MODAL_RUN_STAGE_URL`, `MODAL_ARTIFACT_URL`, `MODAL_INVOKE_TOKEN` | Vercel | Point the dashboard at the runner |

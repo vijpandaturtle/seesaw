@@ -1,6 +1,6 @@
 import json
 
-from shared.lens_tools import LENS_TOOLS
+from shared.lens_tools import catalog
 
 from ..utils import make_llm
 
@@ -34,7 +34,7 @@ def interpret_result(state: dict) -> dict:
 
     llm          = make_llm()
     preview      = data_preview(result["data"])
-    kind         = LENS_TOOLS.get(result["tool"])
+    kind         = catalog().get(result["tool"])
     kind_note    = _KIND_NOTE[kind.kind] if kind else ""
     response     = llm.invoke(
         f"You are an AI safety researcher specialised in mechanistic interpretability.\n"

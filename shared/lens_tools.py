@@ -5,7 +5,13 @@ prompts and the eval graders all read, so adding a tool to Lens means adding it
 here once rather than in five hand-kept copies. No torch import: Scout, Quill
 and the graders run without the experiment stack.
 
-tests/test_lens_tools.py checks this matches Lens's TOOL_REGISTRY exactly.
+There is one catalog per interp backend, chosen with SEESAW_INTERP_BACKEND:
+`seesaw` (default) runs seesaw.interp on TransformerLens text models; `lever`
+runs seesaw.vlm on vision-language models through lever. Everything that lists
+tools reads the active backend's catalog, so Scout never plans a GPT-2 circuit
+experiment Lens can't run on LLaVA, or the reverse.
+
+tests/test_lens_tools.py checks each catalog matches Lens's registry for that backend exactly.
 
 Kinds:
 - descriptive — shows what the model represents or attends to; no causal claim.
@@ -16,9 +22,12 @@ Kinds:
 
 from __future__ import annotations
 
+import os
 from typing import Literal, NamedTuple
 
 Kind = Literal["descriptive", "estimate", "causal"]
+Backend = Literal["seesaw", "lever"]
+BACKENDS: tuple[Backend, ...] = ("seesaw", "lever")
 
 
 class LensTool(NamedTuple):
@@ -79,18 +88,103 @@ LENS_TOOLS: dict[str, LensTool] = {
 }
 
 
-def names(kind: Kind | None = None) -> list[str]:
+# Vision-language models through lever (seesaw.vlm). Every tool takes `images`,
+# one per prompt; CLIP tools take candidate labels as their prompts.
+LEVER_TOOLS: dict[str, LensTool] = {
+    # ── descriptive ──────────────────────────────────────────────────────────
+    "logit_lens": LensTool(
+        "descriptive", "decode the LM residual after each layer: where the answer forms at the answer position, "
+                       "and what image tokens decode to"),
+    "clip_direct_effects": LensTool(
+        "descriptive", "CLIP only: split the image embedding into per-head and per-MLP direct effects on the "
+                       "predicted label (prompts are the candidate labels)"),
+    # ── causal ───────────────────────────────────────────────────────────────
+    "vision_ablation": LensTool(
+        "causal", "zero / mean-ablate everything the vision tower hands the LM: how much of the answer needs the "
+                  "image, and what the language prior alone says"),
+    "image_token_ablation": LensTool(
+        "causal", "wipe the image tokens after each LM layer: by which layer has the answer read what it needs "
+                  "from the image"),
+    "activation_patching": LensTool(
+        "causal", "patch clean LM residuals into a corrupted-image run (corrupted_images), per layer, at image / "
+                  "text / answer positions"),
+    "clip_head_ablation": LensTool(
+        "causal", "CLIP only: zero named heads, each alone and all together, and measure the drop in the "
+                  "predicted label's probability and the flip rate"),
+}
+
+_CATALOGS: dict[str, dict[str, LensTool]] = {"seesaw": LENS_TOOLS, "lever": LEVER_TOOLS}
+
+# What Scout and Lens's planner are told about models and inputs, per backend.
+PLANNING_NOTES: dict[str, str] = {
+    "seesaw": (
+        "Experiments run with TransformerLens on small text models. Prefer GPT-2 Small and Pythia "
+        "(fast, well-studied); SAE tools need a model Neuronpedia hosts SAEs for (e.g. gpt2-small), and "
+        "circuit_tracing reads gemma-2-2b graphs."
+    ),
+    "lever": (
+        "Experiments run through lever on vision-language models, as Hugging Face checkpoints: "
+        "llava-hf/llava-interleave-qwen-0.5b-hf (small, runs anywhere), Qwen/Qwen2.5-VL-3B-Instruct, "
+        "or CLIP (openai/clip-vit-base-patch32) for the clip_ tools. Every experiment needs `images`, one per "
+        "prompt. An image is a file path, an http(s) URL, `text:<words>` (words on a white canvas), "
+        "`solid:<colour>`, or any of those plus `+text:<words>` to stamp words on it (a typographic attack). "
+        "Prompts are questions about the image; answer tokens have no leading space (e.g. 'Yes' / 'No'). "
+        "For CLIP, prompts are the candidate labels. activation_patching also needs corrupted_images: the same "
+        "images with one thing changed so the answer changes."
+    ),
+}
+
+
+# Nominate-then-verify chains, per backend: what follows what.
+TOOL_CHAINS: dict[str, str] = {
+    "seesaw": (
+        "attribution_patching or direct_logit_attribution -> head_patching or ablation with `heads` -> "
+        "circuit_evaluation; edge_attribution_patching -> path_patching; counterfactual -> linear_probe -> "
+        "directional_ablation or steering_vector; feature_attribution -> feature_clamping. "
+        "circuit_tracing reads attribution graphs from Neuronpedia for gemma-2-2b only."
+    ),
+    "lever": (
+        "vision_ablation first (does the answer need the image at all?) -> image_token_ablation (by which "
+        "layer is it read?) -> activation_patching with corrupted_images (which layers and positions carry "
+        "it); logit_lens alongside, as description. For CLIP: clip_direct_effects -> clip_head_ablation "
+        "with `heads`."
+    ),
+}
+
+
+def active_backend() -> Backend:
+    """SEESAW_INTERP_BACKEND, defaulting to seesaw. Read per call, so tests can switch it."""
+    backend = (os.environ.get("SEESAW_INTERP_BACKEND") or "seesaw").strip().lower()
+    if backend not in BACKENDS:
+        raise ValueError(f"SEESAW_INTERP_BACKEND={backend!r}; expected one of {BACKENDS}")
+    return backend  # type: ignore[return-value]
+
+
+def catalog(backend: Backend | None = None) -> dict[str, LensTool]:
+    """The tool catalog for `backend`, or for the active backend."""
+    return _CATALOGS[backend or active_backend()]
+
+
+def planning_notes(backend: Backend | None = None) -> str:
+    return PLANNING_NOTES[backend or active_backend()]
+
+
+def tool_chains(backend: Backend | None = None) -> str:
+    return TOOL_CHAINS[backend or active_backend()]
+
+
+def names(kind: Kind | None = None, backend: Backend | None = None) -> list[str]:
     """Tool names, optionally of one kind, in catalog order."""
-    return [n for n, t in LENS_TOOLS.items() if kind is None or t.kind == kind]
+    return [n for n, t in catalog(backend).items() if kind is None or t.kind == kind]
 
 
-def markdown_table() -> str:
+def markdown_table(backend: Backend | None = None) -> str:
     """| Tool | Kind | What it does | — for prompts that list the toolset."""
     rows = ["| Tool | Kind | What it does |", "|---|---|---|"]
-    rows += [f"| `{n}` | {t.kind} | {t.summary} |" for n, t in LENS_TOOLS.items()]
+    rows += [f"| `{n}` | {t.kind} | {t.summary} |" for n, t in catalog(backend).items()]
     return "\n".join(rows)
 
 
-def bullet_list() -> str:
+def bullet_list(backend: Backend | None = None) -> str:
     """- `name` (kind) — summary"""
-    return "\n".join(f"- `{n}` ({t.kind}) — {t.summary}" for n, t in LENS_TOOLS.items())
+    return "\n".join(f"- `{n}` ({t.kind}) — {t.summary}" for n, t in catalog(backend).items())

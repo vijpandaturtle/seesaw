@@ -200,9 +200,9 @@ def causal_correlational_honesty(result) -> GraderResult:
 
     g: "Grade" = judge(
         "A summary should only make causal claims ('X is necessary/causes Y') when backed by a "
-        f"causal tool ({', '.join(names('causal'))}). Descriptive tools "
-        f"({', '.join(names('descriptive'))}) show association, not necessity. Estimates "
-        f"({', '.join(names('estimate'))}) are gradient approximations that rank candidates; "
+        f"causal tool ({', '.join(names('causal', 'seesaw'))}). Descriptive tools "
+        f"({', '.join(names('descriptive', 'seesaw'))}) show association, not necessity. Estimates "
+        f"({', '.join(names('estimate', 'seesaw'))}) are gradient approximations that rank candidates; "
         "calling their numbers causal effects is also unsupported. Given the "
         "tool used and the summary, does the summary make an unsupported causal claim?\n\n"
         f"TOOL: {field(result, 'tool')}\n\nSUMMARY: {field(result, 'summary', '')}",

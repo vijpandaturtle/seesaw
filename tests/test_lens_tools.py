@@ -18,12 +18,30 @@ import json
 
 import pytest
 
-from shared.lens_tools import LENS_TOOLS, names
+from shared.lens_tools import BACKENDS, LENS_TOOLS, catalog, names
 
 
-def test_catalog_kinds_are_known():
-    assert {t.kind for t in LENS_TOOLS.values()} <= {"descriptive", "estimate", "causal"}
-    assert names("causal") and names("estimate") and names("descriptive")
+@pytest.fixture(autouse=True)
+def _default_backend(monkeypatch):
+    """Dispatch reads SEESAW_INTERP_BACKEND; these tests are about the default one."""
+    monkeypatch.delenv("SEESAW_INTERP_BACKEND", raising=False)
+
+
+@pytest.mark.parametrize("backend", BACKENDS)
+def test_catalog_kinds_are_known(backend):
+    assert {t.kind for t in catalog(backend).values()} <= {"descriptive", "estimate", "causal"}
+    assert names("causal", backend) and names("descriptive", backend)
+    assert names("estimate", "seesaw")
+
+
+def test_backend_comes_from_the_environment(monkeypatch):
+    monkeypatch.delenv("SEESAW_INTERP_BACKEND", raising=False)
+    assert catalog() is LENS_TOOLS
+    monkeypatch.setenv("SEESAW_INTERP_BACKEND", "lever")
+    assert "vision_ablation" in catalog() and "head_patching" not in catalog()
+    monkeypatch.setenv("SEESAW_INTERP_BACKEND", "nnsight")
+    with pytest.raises(ValueError):
+        catalog()
 
 
 torch = pytest.importorskip("torch")
@@ -33,7 +51,7 @@ from transformer_lens import HookedTransformer, HookedTransformerConfig  # noqa:
 
 from lens.mcp_server.src.app.sandbox import run_in_sandbox  # noqa: E402
 from lens.mcp_server.src.tools import (  # noqa: E402
-    TOOL_REGISTRY, normalize_tool_kwargs, prompt_pairs_from_specs,
+    TOOL_REGISTRY, normalize_tool_kwargs, prompt_pairs_from_specs, registry,
 )
 
 PROMPTS   = ["When Mary and John went to the store, John gave a drink to",
@@ -54,8 +72,9 @@ PLAN_KWARGS = {
 EXTERNAL_TOOLS = {"feature_search", "feature_attribution", "feature_clamping", "circuit_tracing"}
 
 
-def test_catalog_matches_registry():
-    assert list(LENS_TOOLS) == list(TOOL_REGISTRY)
+@pytest.mark.parametrize("backend", BACKENDS)
+def test_catalog_matches_registry(backend):
+    assert list(catalog(backend)) == list(registry(backend))
 
 
 @pytest.fixture(scope="module")

@@ -1,4 +1,4 @@
-from shared.lens_tools import bullet_list
+from shared.lens_tools import bullet_list, tool_chains
 
 CRITIQUE_EXPERIMENTS_SYSTEM = """
 You are a senior mechanistic interpretability researcher reviewing a set of experiments.
@@ -65,10 +65,8 @@ that an automated agent (Lens) can execute.
 Available tools (the kind says what evidence each gives):
 __LENS_TOOL_LIST__
 
-Prefer a causal tool when the gap is an unverified claim: a head named by DLA or
-attribution_patching → head_patching or ablation with `heads`; a set of heads →
-circuit_evaluation; an edge from edge_attribution_patching → path_patching; a probe direction →
-directional_ablation; SAE features → feature_clamping.
+Prefer a causal tool when the gap is an unverified claim. What verifies what:
+__LENS_TOOL_CHAINS__
 
 For each follow-up:
 - Choose the tool that most directly tests the gap or weakness
@@ -77,5 +75,5 @@ For each follow-up:
 - Assign priority: high (critical gap), medium (important gap), low (minor gap)
 
 Keep follow-ups actionable. Omit any that require data or infrastructure not available from
-the existing ExperimentBundle and TransformerLens.
-""".strip().replace("__LENS_TOOL_LIST__", bullet_list())
+the existing ExperimentBundle and the tools above.
+""".strip().replace("__LENS_TOOL_LIST__", bullet_list()).replace("__LENS_TOOL_CHAINS__", tool_chains())

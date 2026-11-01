@@ -1,5 +1,5 @@
 import json
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, fields
 from datetime import datetime
 from pathlib import Path
 from typing import Literal
@@ -19,6 +19,7 @@ class ExperimentResult:
     data: dict = field(default_factory=dict)
     status: Literal["success", "failed", "timeout"] = "success"
     error: str | None = None
+    tool_kwargs: dict = field(default_factory=dict)   # what the tool actually ran with
 
 
 @dataclass
@@ -39,7 +40,11 @@ class ExperimentBundle:
     def from_json(cls, path: str | Path) -> "ExperimentBundle":
         with open(path) as f:
             raw = json.load(f)
-        results = [ExperimentResult(**r) for r in raw["results"]]
+        # Lens's schema can grow ahead of this mirror; drop fields Quill doesn't
+        # know rather than failing the whole critique on them.
+        known = {f.name for f in fields(ExperimentResult)}
+        results = [ExperimentResult(**{k: v for k, v in r.items() if k in known})
+                   for r in raw["results"]]
         return cls(
             research_question=raw["research_question"],
             model_name=raw["model_name"],

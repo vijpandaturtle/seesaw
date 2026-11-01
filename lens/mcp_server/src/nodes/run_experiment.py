@@ -1,8 +1,11 @@
-from ..app.model_session import get_model
+from ..app.model_session import get_model, retire_model
 from ..app.remote import is_remote, run_experiment_remote
 from ..app.sandbox import run_in_sandbox
+from ..config import SANDBOX_TIMEOUT, SWEEP_TIMEOUT, SWEEP_TOOLS
 from ..models.schemas import ExperimentResult
-from ..tools import TOOL_REGISTRY, normalize_tool_kwargs
+from shared.lens_tools import active_backend
+
+from ..tools import expand_pairings, normalize_tool_kwargs, registry
 
 
 def run_experiment(state: dict) -> dict:
@@ -14,10 +17,17 @@ def run_experiment(state: dict) -> dict:
     normalised and checked against the tool's real signature before dispatch.
     A spec that can't satisfy its tool fails here with a message naming the
     missing arguments, rather than as a bare TypeError from inside the call.
+    Separate prompt and image lists are expanded to every pairing first.
     """
     queue = list(state["experiment_queue"])
     spec  = queue.pop(0)
     print(f"\n🔬 [run_experiment] '{spec['name']}' using {spec['tool']}")
+
+    prompts, tool_kwargs = expand_pairings(spec["prompts"], spec.get("tool_kwargs") or {})
+    if len(prompts) != len(spec["prompts"]):
+        print(f"   ↳ {len(spec['prompts'])} prompts × {len(prompts) // len(spec['prompts'])} images "
+              f"→ {len(prompts)} pairs")
+        spec = dict(spec, prompts=prompts, tool_kwargs=tool_kwargs)
 
     def failure(error: str) -> ExperimentResult:
         return ExperimentResult(
@@ -27,13 +37,16 @@ def run_experiment(state: dict) -> dict:
             prompts=spec["prompts"],
             status="failed",
             error=error,
+            tool_kwargs=spec.get("tool_kwargs") or {},
         )
 
-    tool_fn = TOOL_REGISTRY.get(spec["tool"])
+    tool_fn = registry().get(spec["tool"])
     if tool_fn is None:
         result = failure(
-            f"Tool '{spec['tool']}' not in registry: {list(TOOL_REGISTRY.keys())}"
+            f"Tool '{spec['tool']}' not in the {active_backend()} registry: {list(registry())}"
         )
+    elif is_remote() and active_backend() != "seesaw":
+        result = failure("The lever backend runs locally only; unset SEESAW_LENS_BACKEND=modal")
     elif is_remote():
         # Modal validates the spec on its side and returns plot bytes, which
         # run_experiment_remote writes into the usual PLOTS_DIR.
@@ -51,19 +64,27 @@ def run_experiment(state: dict) -> dict:
                 f"tool_kwargs {missing}; got {sorted(spec.get('tool_kwargs') or {})}"
             )
         else:
-            m      = get_model(spec["model_name"])
-            result = run_in_sandbox(
+            m       = get_model(spec["model_name"])
+            timeout = SWEEP_TIMEOUT if spec["tool"] in SWEEP_TOOLS[active_backend()] else SANDBOX_TIMEOUT
+            result  = run_in_sandbox(
                 tool_fn,
                 tool_kwargs={"model": m, "prompts": spec["prompts"], **kwargs},
                 experiment_name=spec["name"],
                 tool=spec["tool"],
                 model_name=spec["model_name"],
                 prompts=spec["prompts"],
+                timeout=timeout,
             )
-            # Tools record model.cfg.model_name ("gpt2"), which can differ from
+            if result.status == "timeout":
+                # The thread is still running on `m`, hooks and all; don't let
+                # the next experiment share it.
+                retire_model(spec["model_name"], m)
+                print("   ↳ model retired; the next experiment loads a fresh copy")
+            # Tools record the model's own name ("gpt2"), which can differ from
             # the plan's alias ("gpt2-small"). Follow-ups copy this field, so
             # keep the plan's name or get_model loads a second copy.
             result.model_name = spec["model_name"]
+            result.tool_kwargs = kwargs
 
     icon = "✅" if result.status == "success" else "❌"
     print(f"   {icon} {result.status} | plots={len(result.plot_paths)}")

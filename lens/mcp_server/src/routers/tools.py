@@ -9,6 +9,9 @@ the workflow does. Either way a client can call experiments one at a time
 rather than going through the full research-plan workflow. The orchestrator uses the workflow graph
 directly for the automated pipeline; these tools are for ad-hoc / external
 use (e.g. calling Lens from Claude Desktop or another agent).
+
+The five typed tools are TransformerLens tools. With SEESAW_INTERP_BACKEND=lever,
+use `run_tool`, which dispatches to the active backend's registry.
 """
 
 import json
@@ -19,8 +22,8 @@ from fastmcp import FastMCP
 from ..app.model_session import get_model
 from ..app.sandbox import run_in_sandbox
 from ..tools import (
-    TOOL_REGISTRY,
     normalize_tool_kwargs,
+    registry,
     run_ablation,
     run_activation_patching,
     run_attention_pattern,
@@ -220,15 +223,15 @@ def register_mcp_tools(mcp: FastMCP) -> None:
         Returns:
             JSON ExperimentResult, or a JSON error naming missing arguments.
         """
-        if tool not in TOOL_REGISTRY:
+        if tool not in registry():
             return json.dumps({"status": "failed", "error": f"unknown tool {tool!r}; "
-                               f"available: {sorted(TOOL_REGISTRY)}"})
+                               f"available: {sorted(registry())}"})
         kwargs, missing, dropped = normalize_tool_kwargs(tool, tool_kwargs or {}, len(prompts))
         if missing:
             return json.dumps({"status": "failed", "error": f"{tool} needs {missing}",
                                "ignored": dropped})
         result = run_in_sandbox(
-            TOOL_REGISTRY[tool],
+            registry()[tool],
             tool_kwargs={"model": get_model(model_name), "prompts": prompts, **kwargs},
             experiment_name=tool, tool=tool, model_name=model_name, prompts=prompts,
         )
