@@ -65,6 +65,12 @@ def run_lens_stage(job: Job) -> None:
     )
     jobs.update(job.id, bundle_path=str(bundle_path))
     print(f"   {bundle['n_success']}/{bundle['n_total']} experiments succeeded")
+    # Nothing for Quill to critique: fail here, where retry re-runs Lens,
+    # rather than parking the job at a gate in front of an empty bundle.
+    if bundle["n_total"] and not bundle["n_success"]:
+        first = next((r.get("error") for r in bundle.get("results", []) if r.get("error")), None)
+        raise RuntimeError(f"no experiment succeeded ({bundle['n_total']} failed)"
+                           + (f"; first error: {first}" if first else ""))
 
 
 def run_quill_stage(job: Job) -> None:

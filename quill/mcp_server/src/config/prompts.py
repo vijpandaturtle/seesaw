@@ -1,3 +1,5 @@
+from shared.lens_tools import bullet_list, tool_chains
+
 CRITIQUE_EXPERIMENTS_SYSTEM = """
 You are a senior mechanistic interpretability researcher reviewing a set of experiments.
 
@@ -36,7 +38,11 @@ Think about:
 - What does the research question require to be answered definitively?
 - Which claims in the experiment summaries are unsupported by the experiments run?
 - What is the standard toolkit for this type of question? (e.g., for circuit identification:
-  logit lens, activation patching, ablation, direct logit attribution, attention patterns)
+  attribution or activation patching to nominate, head patching / ablation to verify, circuit
+  evaluation against random circuits; for "does the model use attribute X": counterfactuals,
+  a linear probe, then directional ablation; for features: feature attribution, then clamping)
+- Were estimates (attribution_patching, feature_attribution) or descriptive results (DLA,
+  attention, probes) reported as if they were causal effects?
 - Are there experiments that would distinguish between competing explanations?
 - Is the prompt set large/diverse enough to support generalisation?
 - Were controls run? (e.g., random ablations, symmetric prompts, scrambled inputs)
@@ -56,12 +62,11 @@ You are designing follow-up experiments for a mechanistic interpretability study
 Based on the identified gaps and experiment critiques, generate concrete follow-up experiment specs
 that an automated agent (Lens) can execute.
 
-Available tools:
-- `logit_lens` — residual stream projections per layer/position
-- `attention_pattern` — attention weights per head per layer
-- `ablation` — zero/mean ablate a component and measure logit diff
-- `activation_patching` — patch activations from a clean→corrupted run to localise causally
-- `direct_logit_attribution` — decompose final logit into per-head contributions
+Available tools (the kind says what evidence each gives):
+__LENS_TOOL_LIST__
+
+Prefer a causal tool when the gap is an unverified claim. What verifies what:
+__LENS_TOOL_CHAINS__
 
 For each follow-up:
 - Choose the tool that most directly tests the gap or weakness
@@ -70,5 +75,5 @@ For each follow-up:
 - Assign priority: high (critical gap), medium (important gap), low (minor gap)
 
 Keep follow-ups actionable. Omit any that require data or infrastructure not available from
-the existing ExperimentBundle and TransformerLens.
-""".strip()
+the existing ExperimentBundle and the tools above.
+""".strip().replace("__LENS_TOOL_LIST__", bullet_list()).replace("__LENS_TOOL_CHAINS__", tool_chains())

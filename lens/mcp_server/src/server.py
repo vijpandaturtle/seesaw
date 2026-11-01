@@ -4,8 +4,9 @@ Run standalone:
     python -m lens.mcp_server.src.server
 
 Exposes logit_lens, attention_pattern, ablation, activation_patching, and
-direct_logit_attribution as MCP tools; results://last-bundle as a resource;
-and tool_selection_guide as a prompt.
+direct_logit_attribution as MCP tools, plus run_tool for every other Lens
+tool (see shared/lens_tools.py); results://last-bundle as a resource; and
+tool_selection_guide as a prompt.
 """
 
 from fastmcp import FastMCP

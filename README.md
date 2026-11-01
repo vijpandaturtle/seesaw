@@ -73,18 +73,18 @@ LangGraph ReAct · Claude · Firecrawl
 ### 🔬 Lens
 **The Experiment Runner**
 
-Executes mechanistic interpretability experiments from the Research Plan via TransformerLens, then generates an LLM interpretation of each result.
+Executes mechanistic interpretability experiments from the Research Plan via TransformerLens, then generates an LLM interpretation of each result. 18 tools, grouped by the evidence they give:
 
-| Tool | Answers |
+| Kind | Tools |
 |---|---|
-| `logit_lens` | Where does the model decide? |
-| `attention_pattern` | What does each head attend to? |
-| `direct_logit_attribution` | Which components write the prediction? |
-| `ablation` | Is this component causally necessary? |
-| `activation_patching` | Which layer/position carries the signal? |
+| Descriptive | `logit_lens` · `attention_pattern` · `direct_logit_attribution` · `linear_probe` · `feature_search` · `counterfactual` |
+| Estimate (nominates) | `attribution_patching` · `feature_attribution` · `edge_attribution_patching` · `circuit_tracing` |
+| Causal (verifies) | `ablation` · `activation_patching` · `head_patching` · `circuit_evaluation` · `path_patching` · `steering_vector` · `directional_ablation` · `feature_clamping` |
+
+Full list: [`shared/lens_tools.py`](shared/lens_tools.py).
 
 **Stack**
-LangGraph StateGraph · Claude · TransformerLens
+LangGraph StateGraph · Claude · TransformerLens · SAELens · Neuronpedia
 
 </td>
 <td width="33%" valign="top">

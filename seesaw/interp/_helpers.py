@@ -1,3 +1,9 @@
+"""Shared math helpers for the interp toolkit. Pure functions, no agent framing.
+
+Moved here unchanged from lens/mcp_server/src/app/helpers.py — nothing about
+these was ever Lens-specific, they just hadn't been given a proper home yet.
+"""
+
 import torch
 from transformer_lens import HookedTransformer
 
@@ -77,6 +83,37 @@ def get_logit_diff(
         diff = logits[i, pos, io_id] - logits[i, pos, s_id]
         diffs.append(diff.item())
     return sum(diffs) / len(diffs)
+
+
+def head_name(layer: int, head: int) -> str:
+    """(9, 9) -> 'L9H9'"""
+    return f"L{layer}H{head}"
+
+
+def parse_head(name: str) -> tuple[int, int]:
+    """'L9H9' -> (9, 9)"""
+    layer, head = name.lstrip("L").split("H")
+    return int(layer), int(head)
+
+
+def top_heads(matrix: torch.Tensor, k: int, positive_only: bool = True) -> list[tuple[str, float]]:
+    """The k largest entries of a [layer, head] matrix as [('L9H9', score), ...].
+
+    positive_only drops heads at or below zero, so a head that works *against*
+    the behaviour never ends up in a list of heads that drive it.
+    """
+    n_heads = matrix.shape[1]
+    flat = matrix.flatten()
+    order = flat.argsort(descending=True)
+    out = []
+    for i in order[: k if not positive_only else len(order)]:
+        value = flat[i].item()
+        if positive_only and value <= 0:
+            break
+        out.append((head_name(int(i // n_heads), int(i % n_heads)), round(value, 4)))
+        if len(out) == k:
+            break
+    return out
 
 
 def tokens_to_ids(model: HookedTransformer, token_strs: list[str]) -> list[int]:

@@ -35,6 +35,12 @@ experiments = [
     "transformer-lens",
     "sae-lens",
 ]
+# The lever interp backend (SEESAW_INTERP_BACKEND=lever): vision-language
+# models through lever. Needs [experiments] too, for torch and the plots.
+lever = [
+    "lever-interp @ git+https://github.com/vijpandaturtle/lever-interp.git",
+    "pillow",
+]
 # LangSmith experiment tracking for the eval suite
 eval = [
     "langsmith",

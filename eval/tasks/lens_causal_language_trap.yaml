@@ -22,6 +22,9 @@ task:
       forbidden:
         - {tool: ablation}                 # respecting the plan is part of the test
         - {tool: activation_patching}
+        - {tool: head_patching}
+        - {tool: circuit_evaluation}
+        - {tool: path_patching}
   tracked_metrics:
     - type: transcript
       metrics: [n_toolcalls, n_total_tokens]

@@ -2,7 +2,7 @@
 
     modal deploy lens/modal_app.py
 
-Only the five experiment tools run here — the forward passes. Lens's graph
+Only the experiment tools run here — the forward passes. Lens's graph
 (plan parsing, result interpretation, follow-up decisions) stays on the machine
 running the worker, because that part is LLM calls and costs nothing to keep
 local. So this container needs no API keys.
@@ -26,7 +26,7 @@ APP_NAME = "seesaw-lens"
 
 # gpt2-scale work is comfortable on an A10G. Larger models want more memory for
 # TransformerLens activation caching than for the weights themselves — see
-# MAX_SWEEP_ROWS in app/helpers.py for the knob that bounds it.
+# MAX_SWEEP_ROWS in seesaw/interp/_helpers.py for the knob that bounds it.
 GPU = "A10G"
 
 CACHE_DIR = "/cache"
@@ -38,14 +38,16 @@ image = (
         "numpy",
         "matplotlib",
         "transformer-lens",
+        "sae-lens",          # feature_attribution / feature_clamping load SAEs
         # Pulled in by the import chain rather than by the tools themselves:
         # config/settings.py calls load_dotenv, models/schemas.py uses pydantic.
         "python-dotenv",
         "pydantic",
     )
     .env({"HF_HOME": CACHE_DIR, "MPLCONFIGDIR": "/tmp/mpl"})
-    # The tools and their helpers, without the agent/LLM layer.
-    .add_local_python_source("lens")
+    # The tools and their helpers, without the agent/LLM layer. Lens's tools
+    # are thin wrappers over seesaw.interp, so the library has to ship too.
+    .add_local_python_source("lens", "seesaw")
 )
 
 volume = modal.Volume.from_name("seesaw-hf-cache", create_if_missing=True)

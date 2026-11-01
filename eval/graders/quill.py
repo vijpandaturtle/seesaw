@@ -19,6 +19,8 @@ Lens grades only whether its numbers are right and honestly described.
 
 from __future__ import annotations
 
+from shared.lens_tools import LENS_TOOLS
+
 from .base import GraderResult, GraderType, field, judge
 
 AGENT = "quill"
@@ -26,11 +28,8 @@ AGENT = "quill"
 # Three-way assessment scale, for ordinal miscalibration distance.
 _ASSESSMENT_RANK = {"weak": 0, "moderate": 1, "strong": 2}
 
-# Mirrors lens TOOL_REGISTRY — a follow-up is only executable if its tool exists.
-VALID_LENS_TOOLS = {
-    "logit_lens", "attention_pattern", "direct_logit_attribution",
-    "ablation", "activation_patching",
-}
+# A follow-up is only executable if its tool exists in Lens.
+VALID_LENS_TOOLS = set(LENS_TOOLS)
 
 
 # ── Code graders ─────────────────────────────────────────────────────────────

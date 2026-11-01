@@ -31,6 +31,9 @@ class ExperimentResult:
     data: dict = field(default_factory=dict)
     status: Literal["success", "failed", "timeout"] = "success"
     error: str | None = None
+    # The arguments the tool actually ran with (after normalisation), so a
+    # reader can tell what was measured: which answer tokens, which images.
+    tool_kwargs: dict = field(default_factory=dict)
 
 
 @dataclass
@@ -74,6 +77,5 @@ class FollowUpDecision(BaseModel):
     needs_followup: bool
     reason: str
     followup_tool: str | None = None
-    followup_prompts: list[str] = []
     followup_description: str | None = None
     followup_kwargs: dict = {}

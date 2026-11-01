@@ -1,6 +1,6 @@
 from ..models.schemas import ExperimentSpec, ExperimentResult, ExperimentBundle
 from .model_session import get_model
-from .helpers import get_logit_diff, tokens_to_ids
+from seesaw.interp._helpers import get_logit_diff, tokens_to_ids
 from .sandbox import run_in_sandbox
 
 __all__ = [

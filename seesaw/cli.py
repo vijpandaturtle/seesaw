@@ -5,8 +5,12 @@
     seesaw critique <bundle.json>         Quill only: bundle -> critique report
     seesaw eval <task_id> | --list        Run an eval task against the live agents
     seesaw fixtures [--llm [AGENT]]       Grader meta-eval (offline free; --llm costs)
+    seesaw jobs submit|list|show|approve|retry|cancel|logs|open
+                                          Jobs in the shared store the dashboard reads
 
 The dashboard is a separate project — see github.com/vijpandaturtle/seesaw-web.
+`run` executes in this process and records nothing; `jobs` goes through the
+job store, so the dashboard and the terminal see the same jobs.
 
 Every subcommand is a thin call into `import seesaw` / `seesaw.evals` — anything
 the CLI does, a script or notebook can do too.
@@ -141,6 +145,10 @@ def main() -> int:
                    help="run LLM fixtures (optionally one agent) — costs judge calls")
     p.add_argument("--json", metavar="PATH", help="write fixture health for the dashboard")
     p.set_defaults(fn=_cmd_fixtures)
+
+    from . import jobs_cli
+
+    jobs_cli.add_parser(sub)
 
     args = parser.parse_args()
     return args.fn(args)

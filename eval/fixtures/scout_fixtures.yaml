@@ -171,17 +171,18 @@ fixtures:
     tags: [llm]
     inputs:
       plan: |
-        This question needs SAE feature search, which Lens does not currently provide.
-        We flag this gap; the available tools can only give an indirect, partial answer.
-      missing_capability: "SAE feature search"
+        This question needs model diffing (comparing two checkpoints), which Lens does not
+        currently provide: every Lens tool runs on one model. We flag this gap; running the
+        same tools on each model separately gives only an indirect, partial answer.
+      missing_capability: "model diffing between two checkpoints"
 
   - id: tool_capability_honesty_fail
     grader: scout.tool_capability_honesty
     expected: fail
     tags: [llm]
     inputs:
-      plan: "We will use direct_logit_attribution and ablation to find the SAE features for academic writing style."
-      missing_capability: "SAE feature search"
+      plan: "We will use direct_logit_attribution and ablation on the fine-tuned model to find what fine-tuning changed."
+      missing_capability: "model diffing between two checkpoints"
 
   # ── researcher_would_run (human) ───────────────────────────────────────────
   - id: researcher_would_run_na
