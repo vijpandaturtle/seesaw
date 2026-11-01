@@ -1,6 +1,8 @@
 """Store for research jobs, on SQLite or Postgres.
 
-A *job* is one Scout → Lens → Quill run. Stages execute in a worker
+A *job* is one Scout → Lens → Quill run (kind "research"), or one run of a
+hand-coded pathway from seesaw.pathways (kind "pathway"), whose inputs are
+stored as JSON in `params`. Stages execute in a worker
 process (orchestrator/src/worker.py), never inside whatever created the
 job — a Lens experiment easily outlives the request that asked for it.
 
@@ -30,6 +32,7 @@ has finished Scout and is waiting for a human to approve the plan.
 from __future__ import annotations
 
 import contextlib
+import json
 import os
 import re
 import threading
@@ -54,14 +57,25 @@ def job_dir(job_id: str) -> Path:
     base = Path(os.environ["SEESAW_ARTIFACTS_DIR"]) if os.environ.get("SEESAW_ARTIFACTS_DIR") else OUTPUTS_DIR
     return base / "jobs" / job_id
 
-# Stages in execution order. `stage` is one of these, or "done".
+# Stages in execution order, per kind of job. `stage` is one of these, or "done".
 STAGES = ("scout", "lens", "quill")
+STAGES_BY_KIND = {
+    "research": STAGES,
+    # A pathway is deterministic and LLM-free, so it runs as one stage with no
+    # human gate: its own measure → nominate → verify steps happen inside it.
+    "pathway": ("pathway",),
+}
+KINDS = tuple(STAGES_BY_KIND)
+
+
+def stages_for(kind: str) -> tuple[str, ...]:
+    return STAGES_BY_KIND.get(kind, STAGES)
 
 # Status values.
 QUEUED    = "queued"              # stage ready to run, no worker on it yet
 RUNNING   = "running"             # a worker is executing `stage`
 AWAITING  = "awaiting_approval"   # previous stage done, human gate before `stage`
-DONE      = "done"                # all three stages finished
+DONE      = "done"                # every stage finished
 FAILED    = "failed"              # worker raised; see `error`
 CANCELLED = "cancelled"           # stopped by the user
 
@@ -79,6 +93,8 @@ _ADDED_COLUMNS = {
     "cancel_requested": "INTEGER NOT NULL DEFAULT 0",
     "worker_id":        "TEXT",
     "log_tail":         "TEXT",
+    "kind":             "TEXT NOT NULL DEFAULT 'research'",
+    "params":           "TEXT",
 }
 
 # How much worker output to mirror into the row. A frontend on another host
@@ -105,6 +121,8 @@ class Job:
     cancel_requested: int = 0
     worker_id: str | None = None
     log_tail: str | None = None
+    kind: str = "research"
+    params: str | None = None     # JSON; a pathway job's inputs
 
     @classmethod
     def from_row(cls, row: sqlite3.Row) -> "Job":
@@ -115,11 +133,19 @@ class Job:
         return self.status in ACTIVE_STATUSES
 
     @property
+    def stages(self) -> tuple[str, ...]:
+        return stages_for(self.kind)
+
+    @property
+    def params_dict(self) -> dict:
+        return json.loads(self.params) if self.params else {}
+
+    @property
     def completed_stages(self) -> list[str]:
         """Stages that have produced their artifact."""
         if self.stage == "done":
-            return list(STAGES)
-        return list(STAGES[: STAGES.index(self.stage)])
+            return list(self.stages)
+        return list(self.stages[: self.stages.index(self.stage)])
 
     @property
     def log_path(self) -> Path:
@@ -298,32 +324,54 @@ def connect():
 
 
 # ── CRUD ─────────────────────────────────────────────────────────────────────
-def create(question: str, model: str = "gpt2", auto_approve: bool = False) -> Job:
-    """Insert a new job, queued at the Scout stage.
+def create(question: str, model: str = "gpt2", auto_approve: bool = False,
+           kind: str = "research", params: dict | None = None) -> Job:
+    """Insert a new job, queued at its first stage.
 
     Args:
-        question: The mech interp question to investigate.
-        model: TransformerLens model Lens should target.
+        question: The mech interp question to investigate. For a pathway job,
+            a title for it (the pathway's inputs are in `params`).
+        model: TransformerLens model Lens (or the pathway) should target.
         auto_approve: Run all three stages without stopping at the
-            human gates between them.
+            human gates between them. Pathway jobs have no gates.
+        kind: "research" or "pathway".
+        params: A pathway job's inputs: {"pathway": name, **run() arguments}.
 
     Returns:
         The created Job.
+
+    Raises:
+        ValueError: an unknown kind, or pathway inputs that can't run.
     """
+    if kind not in KINDS:
+        raise ValueError(f"unknown job kind {kind!r}; expected one of {KINDS}")
+    if kind == "pathway":
+        from seesaw.pathways import catalog
+
+        params = dict(params or {})
+        name = params.pop("pathway", None)
+        problems = catalog.validate(name, params, model)
+        if problems:
+            raise ValueError("; ".join(problems))
+        params = {"pathway": name, **params}
+    elif params:
+        raise ValueError("only pathway jobs take params")
+
     now = time.time()
     job = Job(
         id=uuid.uuid4().hex[:8], question=question.strip(), model=model,
-        status=QUEUED, stage="scout", auto_approve=int(auto_approve),
+        status=QUEUED, stage=stages_for(kind)[0], auto_approve=int(auto_approve),
         plan_path=None, bundle_path=None, report_path=None, error=None,
         pid=None, created_at=now, updated_at=now,
+        kind=kind, params=json.dumps(params) if params else None,
     )
     with connect() as conn:
         _ex(
             conn,
             "INSERT INTO jobs (id, question, model, status, stage, auto_approve,"
-            " created_at, updated_at) VALUES (?,?,?,?,?,?,?,?)",
+            " created_at, updated_at, kind, params) VALUES (?,?,?,?,?,?,?,?,?,?)",
             (job.id, job.question, job.model, job.status, job.stage,
-             job.auto_approve, job.created_at, job.updated_at),
+             job.auto_approve, job.created_at, job.updated_at, job.kind, job.params),
         )
     return job
 
@@ -369,11 +417,12 @@ def advance(job: Job) -> None:
     The last stage completes the job; otherwise the next stage is either
     queued (auto_approve) or parked at its human gate.
     """
-    idx = STAGES.index(job.stage)
-    if idx == len(STAGES) - 1:
+    stages = job.stages
+    idx = stages.index(job.stage)
+    if idx == len(stages) - 1:
         update(job.id, stage="done", status=DONE, pid=None)
     else:
-        update(job.id, stage=STAGES[idx + 1],
+        update(job.id, stage=stages[idx + 1],
                status=QUEUED if job.auto_approve else AWAITING)
 
 
