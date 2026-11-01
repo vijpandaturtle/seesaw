@@ -34,6 +34,7 @@ class LensState(TypedDict):
     followup_count:    int
     results:           list[dict]
     bundle:            dict | None
+    output_dir:        str       # bundle and plots go here; defaults to Lens's OUTPUTS_DIR
 
 
 # ── Router ────────────────────────────────────────────────────────────────────

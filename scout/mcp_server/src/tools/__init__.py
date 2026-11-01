@@ -2,7 +2,7 @@ from .search_arxiv import search_arxiv
 from .search_arxiv_web import search_arxiv_web
 from .search_web import search_web
 from .scrape_url import scrape_url
-from .save_research_plan import save_research_plan
+from .save_research_plan import make_save_research_plan, save_research_plan
 
 SCOUT_TOOLS = [
     search_arxiv,
@@ -18,5 +18,6 @@ __all__ = [
     "search_web",
     "scrape_url",
     "save_research_plan",
+    "make_save_research_plan",
     "SCOUT_TOOLS",
 ]

@@ -229,3 +229,5 @@ def test_columns_are_added_to_an_existing_database(tmp_path, monkeypatch):
     assert survivor.question == "legacy question"
     assert survivor.cancel_requested == 0
     assert survivor.worker_id is None
+    assert survivor.kind == "research"
+    assert survivor.params is None

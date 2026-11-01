@@ -1,4 +1,5 @@
-"""Run a research job's stages.
+"""Run a job's stages: Scout → Lens → Quill for a research job, or one
+pathway from seesaw.pathways for a pathway job.
 
     python -m orchestrator.src.worker <job_id>   one job, then exit
     python -m orchestrator.src.worker --poll     claim queued jobs forever
@@ -24,6 +25,7 @@ remote dashboard can read it.
 
 from __future__ import annotations
 
+import json
 import os
 import socket
 import sys
@@ -46,7 +48,8 @@ _MODEL_OVERRIDE = (
 def run_scout_stage(job: Job) -> None:
     from .clients.scout_client import run_scout
 
-    plan_path = run_scout(job.question, thread_id=f"job-{job.id}-scout")
+    plan_path = run_scout(job.question, thread_id=f"job-{job.id}-scout",
+                          output_dir=jobs.job_dir(job.id))
     jobs.update(job.id, plan_path=str(plan_path))
 
 
@@ -62,6 +65,7 @@ def run_lens_stage(job: Job) -> None:
     bundle, bundle_path = run_lens(
         plan_text + _MODEL_OVERRIDE.format(model=job.model),
         thread_id=f"job-{job.id}-lens",
+        output_dir=jobs.job_dir(job.id),
     )
     jobs.update(job.id, bundle_path=str(bundle_path))
     print(f"   {bundle['n_success']}/{bundle['n_total']} experiments succeeded")
@@ -81,15 +85,59 @@ def run_quill_stage(job: Job) -> None:
     if not job.bundle_path:
         raise RuntimeError("no results bundle on this job — Lens stage produced none")
 
-    report, report_path = run_quill(Path(job.bundle_path), thread_id=f"job-{job.id}-quill")
+    report, report_path = run_quill(Path(job.bundle_path), thread_id=f"job-{job.id}-quill",
+                                    output_dir=jobs.job_dir(job.id))
     jobs.update(job.id, report_path=str(report_path))
     print(f"   assessment: {report.overall_assessment}")
 
 
+def run_pathway_stage(job: Job) -> None:
+    """Run a hand-coded pathway on the job's inputs.
+
+    Writes the pathway's one-page report as the job's report, and its verdict,
+    evidence, findings and plots as the job's bundle (JSON), so the dashboard
+    can show them without parsing markdown.
+    """
+    from seesaw.pathways import catalog
+
+    params = job.params_dict
+    name = params.pop("pathway", None)
+    out = jobs.job_dir(job.id) / "pathway"
+    out.mkdir(parents=True, exist_ok=True)
+
+    print(f"   pathway {name} on {job.model}")
+    result = catalog.run_from_params(name, job.model, params, out)
+
+    report_path = out / "report.md"
+    report_path.write_text(result.to_markdown())
+    bundle_path = out / "result.json"
+    bundle_path.write_text(json.dumps({
+        "pathway": result.pathway,
+        "verdict": result.verdict,
+        "evidence": result.evidence,
+        "findings": result.findings,
+        "stopped_early": result.stopped_early,
+        "steps": list(result.steps),
+        "plot_paths": [str(p) for p in result.plot_paths],
+    }, indent=2, default=_jsonable))
+    jobs.update(job.id, report_path=str(report_path), bundle_path=str(bundle_path))
+    print(f"   verdict: {result.verdict}")
+
+
+def _jsonable(value):
+    """Findings hold numpy scalars, tensors and paths; JSON gets plain values."""
+    if hasattr(value, "tolist"):
+        return value.tolist()
+    if hasattr(value, "item"):
+        return value.item()
+    return str(value)
+
+
 STAGE_FNS = {
-    "scout": run_scout_stage,
-    "lens":  run_lens_stage,
-    "quill": run_quill_stage,
+    "scout":   run_scout_stage,
+    "lens":    run_lens_stage,
+    "quill":   run_quill_stage,
+    "pathway": run_pathway_stage,
 }
 
 
