@@ -372,6 +372,31 @@ def approve(job_id: str) -> None:
     update(job_id, status=QUEUED, error=None)
 
 
+def _requeue_from(job_id: str, status: str) -> bool:
+    with connect() as conn:
+        cur = _ex(
+            conn,
+            "UPDATE jobs SET status = ?, error = NULL, updated_at = ? WHERE id = ? AND status = ?",
+            (QUEUED, time.time(), job_id, status),
+        )
+        return cur.rowcount > 0
+
+
+def approve_if_awaiting(job_id: str) -> bool:
+    """Approve only a job still parked at its gate, atomically.
+
+    For callers acting on what they read a while ago (a terminal, a stale
+    page): the job may have been approved or cancelled since, and re-queueing
+    it then would run a stage twice. Same guard as the dashboard's approve.
+    """
+    return _requeue_from(job_id, AWAITING)
+
+
+def retry_if_failed(job_id: str) -> bool:
+    """Re-queue a failed job's stage, only if it's still failed."""
+    return _requeue_from(job_id, FAILED)
+
+
 def claim(job_id: str, worker_id: str) -> Job | None:
     """Take ownership of a queued job, atomically.
 
