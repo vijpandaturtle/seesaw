@@ -46,7 +46,8 @@ _MODEL_OVERRIDE = (
 def run_scout_stage(job: Job) -> None:
     from .clients.scout_client import run_scout
 
-    plan_path = run_scout(job.question, thread_id=f"job-{job.id}-scout")
+    plan_path = run_scout(job.question, thread_id=f"job-{job.id}-scout",
+                          output_dir=jobs.job_dir(job.id))
     jobs.update(job.id, plan_path=str(plan_path))
 
 
@@ -62,6 +63,7 @@ def run_lens_stage(job: Job) -> None:
     bundle, bundle_path = run_lens(
         plan_text + _MODEL_OVERRIDE.format(model=job.model),
         thread_id=f"job-{job.id}-lens",
+        output_dir=jobs.job_dir(job.id),
     )
     jobs.update(job.id, bundle_path=str(bundle_path))
     print(f"   {bundle['n_success']}/{bundle['n_total']} experiments succeeded")
@@ -81,7 +83,8 @@ def run_quill_stage(job: Job) -> None:
     if not job.bundle_path:
         raise RuntimeError("no results bundle on this job — Lens stage produced none")
 
-    report, report_path = run_quill(Path(job.bundle_path), thread_id=f"job-{job.id}-quill")
+    report, report_path = run_quill(Path(job.bundle_path), thread_id=f"job-{job.id}-quill",
+                                    output_dir=jobs.job_dir(job.id))
     jobs.update(job.id, report_path=str(report_path))
     print(f"   assessment: {report.overall_assessment}")
 

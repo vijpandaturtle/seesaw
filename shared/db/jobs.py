@@ -44,6 +44,16 @@ REPO_ROOT   = Path(__file__).resolve().parents[2]
 OUTPUTS_DIR = REPO_ROOT / "outputs"
 LOGS_DIR    = OUTPUTS_DIR / "job_logs"
 
+
+def job_dir(job_id: str) -> Path:
+    """The folder a job's plan, bundle, plots and report are written to.
+
+    One per job, so a later job can't overwrite an earlier one's artifacts.
+    Under SEESAW_ARTIFACTS_DIR when set (the Modal volume), else outputs/.
+    """
+    base = Path(os.environ["SEESAW_ARTIFACTS_DIR"]) if os.environ.get("SEESAW_ARTIFACTS_DIR") else OUTPUTS_DIR
+    return base / "jobs" / job_id
+
 # Stages in execution order. `stage` is one of these, or "done".
 STAGES = ("scout", "lens", "quill")
 

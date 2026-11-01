@@ -1,7 +1,10 @@
+import inspect
+from pathlib import Path
+
 from ..app.model_session import get_model, retire_model
 from ..app.remote import is_remote, run_experiment_remote
 from ..app.sandbox import run_in_sandbox
-from ..config import SANDBOX_TIMEOUT, SWEEP_TIMEOUT, SWEEP_TOOLS
+from ..config import PLOTS_DIR, SANDBOX_TIMEOUT, SWEEP_TIMEOUT, SWEEP_TOOLS
 from ..models.schemas import ExperimentResult
 from shared.lens_tools import active_backend
 
@@ -20,6 +23,7 @@ def run_experiment(state: dict) -> dict:
     Separate prompt and image lists are expanded to every pairing first.
     """
     queue = list(state["experiment_queue"])
+    plots_dir = Path(state["output_dir"]) / "plots" if state.get("output_dir") else PLOTS_DIR
     spec  = queue.pop(0)
     print(f"\n🔬 [run_experiment] '{spec['name']}' using {spec['tool']}")
 
@@ -51,7 +55,7 @@ def run_experiment(state: dict) -> dict:
         # Modal validates the spec on its side and returns plot bytes, which
         # run_experiment_remote writes into the usual PLOTS_DIR.
         print("   ↗ running on Modal")
-        result = run_experiment_remote(spec)
+        result = run_experiment_remote(spec, output_dir=plots_dir)
     else:
         kwargs, missing, dropped = normalize_tool_kwargs(
             spec["tool"], spec.get("tool_kwargs", {}), len(spec["prompts"])
@@ -64,6 +68,10 @@ def run_experiment(state: dict) -> dict:
                 f"tool_kwargs {missing}; got {sorted(spec.get('tool_kwargs') or {})}"
             )
         else:
+            # The job's folder, not the plan's say: the model never picks where plots go.
+            if "output_dir" in inspect.signature(tool_fn).parameters:
+                plots_dir.mkdir(parents=True, exist_ok=True)
+                kwargs["output_dir"] = plots_dir
             m       = get_model(spec["model_name"])
             timeout = SWEEP_TIMEOUT if spec["tool"] in SWEEP_TOOLS[active_backend()] else SANDBOX_TIMEOUT
             result  = run_in_sandbox(
@@ -84,7 +92,7 @@ def run_experiment(state: dict) -> dict:
             # the plan's alias ("gpt2-small"). Follow-ups copy this field, so
             # keep the plan's name or get_model loads a second copy.
             result.model_name = spec["model_name"]
-            result.tool_kwargs = kwargs
+            result.tool_kwargs = {k: v for k, v in kwargs.items() if k != "output_dir"}
 
     icon = "✅" if result.status == "success" else "❌"
     print(f"   {icon} {result.status} | plots={len(result.plot_paths)}")

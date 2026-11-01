@@ -10,15 +10,17 @@ from quill.mcp_server.src.workflows.critique_workflow import build_quill_graph
 def run_quill(
     bundle_path: Path,
     thread_id: str = "quill-1",
+    output_dir: Path = OUTPUTS_DIR,
 ) -> tuple[CritiqueReport, Path]:
     """Run the Quill critique workflow on a Lens results bundle.
 
     Loads the bundle from disk, runs critique → gap analysis →
-    follow-up generation → save, and writes the report to quill/outputs/.
+    follow-up generation → save, and writes the report to output_dir.
 
     Args:
         bundle_path: Path to the results_bundle.json produced by Lens.
         thread_id: LangGraph thread ID for checkpointing.
+        output_dir: Where the report goes; a job passes its own folder.
 
     Returns:
         Tuple of (CritiqueReport, path to the saved critique markdown file).
@@ -40,7 +42,7 @@ def run_quill(
     print(f"✍️  Quill critiquing {len(bundle.results)} experiments...")
 
     final = graph.invoke(
-        {"bundle": bundle, "output_dir": OUTPUTS_DIR},
+        {"bundle": bundle, "output_dir": output_dir},
         config=config,
     )
 

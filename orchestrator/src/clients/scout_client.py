@@ -11,6 +11,7 @@ def run_scout(
     research_question: str,
     thread_id: str = "scout-1",
     verbose: bool = True,
+    output_dir: Path = OUTPUTS_DIR,
 ) -> Path:
     """Run the Scout agent on a research question.
 
@@ -22,12 +23,13 @@ def run_scout(
     "gender_bias_attention_heads_research_plan.md", not always the
     literal "research_plan.md"), so instead of checking a fixed name,
     this looks for the newest "*research_plan*.md" file written to
-    OUTPUTS_DIR during this run.
+    output_dir during this run.
 
     Args:
         research_question: The mech interp question to research.
         thread_id: LangGraph thread ID for checkpointing.
         verbose: Print agent messages as they stream.
+        output_dir: Where the plan is saved; a job passes its own folder.
 
     Returns:
         Path to the saved research plan markdown file.
@@ -35,7 +37,7 @@ def run_scout(
     Raises:
         RuntimeError: If Scout finishes without saving a plan.
     """
-    agent      = build_agent()
+    agent      = build_agent(output_dir=output_dir)
     config     = {"configurable": {"thread_id": thread_id}}
     start_time = time.time()
 
@@ -55,12 +57,12 @@ def run_scout(
                 print(last.content[:500])
 
     candidates = [
-        p for p in OUTPUTS_DIR.glob("*research_plan*.md")
+        p for p in output_dir.glob("*research_plan*.md")
         if p.stat().st_mtime >= start_time
     ]
     if not candidates:
         raise RuntimeError(
-            f"Scout completed but no *research_plan*.md file appeared in {OUTPUTS_DIR}. "
+            f"Scout completed but no *research_plan*.md file appeared in {output_dir}. "
             "Check that save_research_plan was called."
         )
 
