@@ -93,7 +93,8 @@ seesaw jobs submit "Does LLaVA use the image for counting?" --model llava-hf/lla
 
 | Command | Does |
 |---|---|
-| `submit "<question>"` | Create a job and start its Scout stage. `--model`, `--auto-approve`, `--follow` |
+| `submit "<question>"` | Create a job and start its Scout stage. `--pathway` makes one of seesaw's pathways part of it (Scout chooses its inputs); `--model`, `--auto-approve`, `--follow` |
+| `rerun <id>` | Run a job's pathway again on its approved inputs, as a new job starting at Lens (no Scout). `--model` runs it on another model. See [docs/use-cases.md](docs/use-cases.md#reproducing-a-result) |
 | `list` | Recent jobs, newest first. `--json` for scripts |
 | `show <id>` | Status, artifact paths, error, and what to do next |
 | `approve <id>` | Clear the approval gate and start the next stage. Refused unless the job is still awaiting approval |
@@ -105,6 +106,30 @@ seesaw jobs submit "Does LLaVA use the image for counting?" --model llava-hf/lla
 `--follow` streams the log and, at an approval gate, asks whether to approve. Ctrl-C stops watching, not the job: the worker runs detached.
 
 Who runs a stage is picked as the dashboard picks it: the Modal function when `MODAL_RUN_STAGE_URL` is set, otherwise a detached local worker writing to `outputs/job_logs/<id>.log`. `--runner queue` starts nothing and leaves the job for `python -m orchestrator.src.worker --poll`. Whatever `DATABASE_URL` points at is the store the commands use, so with the production URL in `.env`, `submit` queues a real job.
+
+To run one of the hand-coded pathways as a job, and for sample questions sorted by what you want to find out, see **[docs/use-cases.md](docs/use-cases.md)**.
+
+#### The job timeline
+
+Besides the log, every worker records a structured timeline of the job in the store's `job_events` table ([shared/db/events.py](shared/db/events.py)), written as it happens:
+
+| Kind | One per |
+|---|---|
+| `stage` | stage (`scout`, `lens`, `quill`, `pathway`), with how long it took and the error if it failed |
+| `node` | LangGraph node the agent ran |
+| `llm` | model call: the model, tokens in and out, the last prompt message, the answer and any tool calls it asked for |
+| `tool` | agent tool call (Scout's searches, its plan save): input and output |
+| `experiment` | Lens experiment: tool, prompts, arguments, status, plots, raw data |
+| `pathway` / `step` | pathway run and each of its steps, with the step's numbers and plots |
+| `check` | check on Scout's pathway inputs, with the problems it sent back |
+| `error` / `status` | failure with its traceback, and every change of job status |
+
+Events nest under the span they happened in, so an LLM call sits under its node and the node under its stage. The dashboard shows this as the job's **Timeline** tab. Long strings and lists are cut short; the artifacts on disk keep everything. Nothing is recorded outside a worker, and a timeline that can't be written prints one warning and never fails the job. The table is created the first time a current worker opens the store, like the other columns.
+
+```python
+from shared.db import events
+events.list_events("b1967577")     # oldest first, data decoded
+```
 
 ---
 

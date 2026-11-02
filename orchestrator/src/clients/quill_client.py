@@ -5,6 +5,7 @@ from pathlib import Path
 from quill.mcp_server.src.config.settings import OUTPUTS_DIR
 from quill.mcp_server.src.models.schemas import CritiqueReport, ExperimentBundle
 from quill.mcp_server.src.workflows.critique_workflow import build_quill_graph
+from shared.db import events
 
 
 def run_quill(
@@ -37,7 +38,7 @@ def run_quill(
 
     bundle = ExperimentBundle.from_json(bundle_path)
     graph  = build_quill_graph()
-    config = {"configurable": {"thread_id": thread_id}}
+    config = {"configurable": {"thread_id": thread_id}, "callbacks": events.callbacks()}
 
     print(f"✍️  Quill critiquing {len(bundle.results)} experiments...")
 

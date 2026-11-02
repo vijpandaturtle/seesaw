@@ -1,10 +1,14 @@
 """Store for research jobs, on SQLite or Postgres.
 
-A *job* is one Scout → Lens → Quill run (kind "research"), or one run of a
-hand-coded pathway from seesaw.pathways (kind "pathway"), whose inputs are
-stored as JSON in `params`. Stages execute in a worker
-process (orchestrator/src/worker.py), never inside whatever created the
-job — a Lens experiment easily outlives the request that asked for it.
+A *job* is one Scout → Lens → Quill run on a research question. It may name
+one of seesaw.pathways (params = {"pathway": name}): Scout then chooses that
+pathway's inputs, the worker writes the validated ones back as
+params["pathway_params"], and Lens runs the pathway on them before anything
+else. `rerun` starts a new job from those saved inputs at Lens, skipping
+Scout, which is how a pathway result is reproduced (or compared on another
+model): the pathways are deterministic, the LLMs are not. Stages execute in a
+worker process (orchestrator/src/worker.py), never inside whatever created
+the job — a Lens experiment easily outlives the request that asked for it.
 
 This store is the only shared state between the dashboard and the
 workers: the dashboard creates jobs and records approvals, workers claim
@@ -61,11 +65,11 @@ def job_dir(job_id: str) -> Path:
 STAGES = ("scout", "lens", "quill")
 STAGES_BY_KIND = {
     "research": STAGES,
-    # A pathway is deterministic and LLM-free, so it runs as one stage with no
-    # human gate: its own measure → nominate → verify steps happen inside it.
+    # Standalone pathway jobs: a pathway run on hand-entered inputs as one
+    # stage. No longer created or run (a pathway runs inside a research job,
+    # and `rerun` reproduces one); kept so the rows already stored still read.
     "pathway": ("pathway",),
 }
-KINDS = tuple(STAGES_BY_KIND)
 
 
 def stages_for(kind: str) -> tuple[str, ...]:
@@ -84,7 +88,7 @@ ACTIVE_STATUSES = (QUEUED, RUNNING)
 _COLUMNS = (
     "question", "model", "status", "stage", "auto_approve",
     "plan_path", "bundle_path", "report_path", "error", "pid", "updated_at",
-    "cancel_requested", "worker_id", "log_tail",
+    "cancel_requested", "worker_id", "log_tail", "params",
 )
 
 # Added after the first release; connect() backfills them on open so an
@@ -122,7 +126,7 @@ class Job:
     worker_id: str | None = None
     log_tail: str | None = None
     kind: str = "research"
-    params: str | None = None     # JSON; a pathway job's inputs
+    params: str | None = None     # JSON; a pathway job's inputs, or a research job's pathway
 
     @classmethod
     def from_row(cls, row: sqlite3.Row) -> "Job":
@@ -170,8 +174,8 @@ def is_postgres() -> bool:
     return bool(os.environ.get("DATABASE_URL"))
 
 
-def _table() -> str:
-    """How to name the jobs table for the active backend.
+def _table(name: str = "jobs") -> str:
+    """How to name a table (jobs, job_events) for the active backend.
 
     Schema-qualified rather than selected with `SET search_path`, because a
     pooled Postgres endpoint (Neon's `-pooler` host, PgBouncer in transaction
@@ -180,7 +184,7 @@ def _table() -> str:
     holding. Qualifying per statement is unaffected.
     """
     schema = os.environ.get("SEESAW_DB_SCHEMA")
-    return f'"{schema}".jobs' if schema and is_postgres() else "jobs"
+    return f'"{schema}".{name}' if schema and is_postgres() else name
 
 
 def _q(sql: str) -> str:
@@ -188,8 +192,9 @@ def _q(sql: str) -> str:
     if not is_postgres():
         return sql
     sql = sql.replace("?", "%s")
-    table = _table()
-    return sql if table == "jobs" else re.sub(r"\bjobs\b", table, sql)
+    if _table() == "jobs":
+        return sql
+    return re.sub(r"\b(jobs|job_events)\b", lambda m: _table(m.group(1)), sql)
 
 
 def _ex(conn, sql: str, params: tuple = ()):
@@ -221,6 +226,26 @@ def _create_table_sql(real_type: str) -> str:
         f"{name:13s} {spec.format(REAL=real_type)}" for name, spec in _BASE_COLUMNS
     )
     return f"CREATE TABLE IF NOT EXISTS jobs (\n            {cols}\n        )"
+
+
+def _events_ddl(id_type: str, real_type: str) -> list[str]:
+    """The job_events table (shared/db/events.py), one row per thing a worker did."""
+    return [
+        f"""CREATE TABLE IF NOT EXISTS job_events (
+            id          {id_type},
+            job_id      TEXT NOT NULL,
+            parent_id   BIGINT,
+            ts          {real_type} NOT NULL,
+            stage       TEXT,
+            kind        TEXT NOT NULL,
+            name        TEXT NOT NULL,
+            status      TEXT NOT NULL,
+            duration_ms {real_type},
+            summary     TEXT,
+            data        TEXT
+        )""",
+        "CREATE INDEX IF NOT EXISTS job_events_by_job ON job_events (job_id, id)",
+    ]
 
 
 # One pool per process. Opening a fresh TLS connection to a hosted Postgres
@@ -263,8 +288,8 @@ def _get_pool():
             kwargs={"row_factory": dict_row, "autocommit": True},
             open=True,
         )
-        # Schema setup runs once per pool, not once per query — it's four DDL
-        # round-trips, which is most of the cost of opening a connection.
+        # Schema setup runs once per pool, not once per query — it's a handful
+        # of DDL round-trips, which is most of the cost of opening a connection.
         with pool.connection() as conn:
             if schema:
                 conn.execute(f'CREATE SCHEMA IF NOT EXISTS "{schema}"')
@@ -273,6 +298,8 @@ def _get_pool():
                 conn.execute(
                     _q(f"ALTER TABLE jobs ADD COLUMN IF NOT EXISTS {column} {spec}")
                 )
+            for statement in _events_ddl("BIGSERIAL PRIMARY KEY", "DOUBLE PRECISION"):
+                conn.execute(_q(statement))
 
         _pool, _pool_key = pool, key
 
@@ -298,6 +325,8 @@ def _connect_sqlite() -> sqlite3.Connection:
         for column, spec in _ADDED_COLUMNS.items():
             if column not in existing:
                 conn.execute(f"ALTER TABLE jobs ADD COLUMN {column} {spec}")
+        for statement in _events_ddl("INTEGER PRIMARY KEY AUTOINCREMENT", "REAL"):
+            conn.execute(statement)
         conn.commit()
         _sqlite_ready.add(str(path))
     return conn
@@ -325,53 +354,95 @@ def connect():
 
 # ── CRUD ─────────────────────────────────────────────────────────────────────
 def create(question: str, model: str = "gpt2", auto_approve: bool = False,
-           kind: str = "research", params: dict | None = None) -> Job:
-    """Insert a new job, queued at its first stage.
+           params: dict | None = None) -> Job:
+    """Insert a new job, queued at Scout.
 
     Args:
-        question: The mech interp question to investigate. For a pathway job,
-            a title for it (the pathway's inputs are in `params`).
-        model: TransformerLens model Lens (or the pathway) should target.
+        question: The mech interp question to investigate.
+        model: TransformerLens model Lens (and the pathway) should target.
         auto_approve: Run all three stages without stopping at the
-            human gates between them. Pathway jobs have no gates.
-        kind: "research" or "pathway".
-        params: A pathway job's inputs: {"pathway": name, **run() arguments}.
+            human gates between them.
+        params: {"pathway": name} to make one of seesaw.pathways part of the
+            job. Scout chooses its inputs.
 
     Returns:
         The created Job.
 
     Raises:
-        ValueError: an unknown kind, or pathway inputs that can't run.
+        ValueError: params other than a pathway, or an unknown pathway.
     """
-    if kind not in KINDS:
-        raise ValueError(f"unknown job kind {kind!r}; expected one of {KINDS}")
-    if kind == "pathway":
+    if params:
         from seesaw.pathways import catalog
 
-        params = dict(params or {})
-        name = params.pop("pathway", None)
-        problems = catalog.validate(name, params, model)
-        if problems:
-            raise ValueError("; ".join(problems))
-        params = {"pathway": name, **params}
-    elif params:
-        raise ValueError("only pathway jobs take params")
+        if set(params) != {"pathway"}:
+            raise ValueError("a research job's params name only a pathway: "
+                             "{\"pathway\": name}; Scout chooses its inputs")
+        if params["pathway"] not in catalog.names():
+            raise ValueError(f"unknown pathway {params['pathway']!r}; "
+                             f"expected one of {catalog.names()}")
+        if params["pathway"] == "feature_explain" and model not in catalog.SAE_MODELS:
+            raise ValueError(f"feature_explain only runs on gpt2, not {model!r}")
 
+    return _insert(question, model, STAGES[0], auto_approve, params)
+
+
+def rerun(job_id: str, model: str | None = None, auto_approve: bool = False) -> Job:
+    """A new job that runs a job's pathway again on its approved inputs.
+
+    It starts queued at Lens with the source job's plan and exactly the
+    inputs approved there, so Scout (and its LLM) never runs again: the same
+    pathway version on the same model and inputs gives the same verdict. On
+    another model, it's the same experiment on that model. Lens's extra
+    experiments come from the same plan, but an LLM reads them out of it, so
+    only the pathway is guaranteed to repeat.
+
+    Args:
+        job_id: A research job whose pathway inputs were approved (it got past
+            Scout).
+        model: Run on this model instead of the source job's.
+        auto_approve: Go on to Quill without stopping at its gate.
+
+    Raises:
+        ValueError: no such job, no approved pathway inputs to rerun, or
+            inputs that can't run on `model` (e.g. an answer token that is two
+            tokens in its tokenizer).
+    """
+    from seesaw.pathways import catalog
+
+    source = get(job_id)
+    if source is None:
+        raise ValueError(f"no job {job_id!r}")
+    params = source.params_dict
+    name, inputs = params.get("pathway"), params.get("pathway_params")
+    if source.kind != "research" or not name or not inputs or not source.plan_path:
+        raise ValueError(f"job {job_id} has no approved pathway inputs to rerun: only a "
+                         "research job that names a pathway and got past Scout has them")
+    model = model or source.model
+    problems = catalog.check_inputs(name, inputs, model)
+    if problems:
+        raise ValueError(f"job {job_id}'s inputs can't run on {model}: " + "; ".join(problems))
+    return _insert(source.question, model, "lens", auto_approve,
+                   {"pathway": name, "pathway_params": inputs, "rerun_of": source.id},
+                   plan_path=source.plan_path)
+
+
+def _insert(question: str, model: str, stage: str, auto_approve: bool,
+            params: dict | None, plan_path: str | None = None) -> Job:
     now = time.time()
     job = Job(
         id=uuid.uuid4().hex[:8], question=question.strip(), model=model,
-        status=QUEUED, stage=stages_for(kind)[0], auto_approve=int(auto_approve),
-        plan_path=None, bundle_path=None, report_path=None, error=None,
+        status=QUEUED, stage=stage, auto_approve=int(auto_approve),
+        plan_path=plan_path, bundle_path=None, report_path=None, error=None,
         pid=None, created_at=now, updated_at=now,
-        kind=kind, params=json.dumps(params) if params else None,
+        kind="research", params=json.dumps(params) if params else None,
     )
     with connect() as conn:
         _ex(
             conn,
             "INSERT INTO jobs (id, question, model, status, stage, auto_approve,"
-            " created_at, updated_at, kind, params) VALUES (?,?,?,?,?,?,?,?,?,?)",
-            (job.id, job.question, job.model, job.status, job.stage,
-             job.auto_approve, job.created_at, job.updated_at, job.kind, job.params),
+            " plan_path, created_at, updated_at, kind, params) VALUES (?,?,?,?,?,?,?,?,?,?,?)",
+            (job.id, job.question, job.model, job.status, job.stage, job.auto_approve,
+             job.plan_path, job.created_at, job.updated_at, job.kind, job.params),
         )
     return job
 
@@ -405,8 +476,9 @@ def update(job_id: str, **fields) -> None:
 
 
 def delete(job_id: str) -> None:
-    """Drop the job record. Artifacts on disk are left alone."""
+    """Drop the job record and its events. Artifacts on disk are left alone."""
     with connect() as conn:
+        _ex(conn, "DELETE FROM job_events WHERE job_id = ?", (job_id,))
         _ex(conn, "DELETE FROM jobs WHERE id = ?", (job_id,))
 
 

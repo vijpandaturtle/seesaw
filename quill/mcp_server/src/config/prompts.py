@@ -24,6 +24,12 @@ Your job is to critically evaluate each experiment on:
 
 5. **Positive aspects** — What does the experiment do well?
 
+If one experiment is marked as the **pathway** result, it is the primary evidence: a fixed,
+hand-coded recipe run on inputs approved before the run, so its verdict is comparable across
+models. Critique it first and most carefully (were the inputs a fair test of the question? does
+its evidence support its verdict?). The other experiments are extras Lens chose; judge them by
+whether they corroborate, qualify or contradict the pathway's verdict.
+
 Be precise and concrete. Cite specific numbers from the data when making a claim.
 Do not pad. If an experiment is genuinely strong, say so.
 """.strip()
@@ -46,6 +52,8 @@ Think about:
 - Are there experiments that would distinguish between competing explanations?
 - Is the prompt set large/diverse enough to support generalisation?
 - Were controls run? (e.g., random ablations, symmetric prompts, scrambled inputs)
+- If a pathway result is present, it is the primary evidence: what would its verdict need
+  (other inputs, controls, a different model) before the central claim could rest on it?
 
 Classify each gap by severity:
 - critical: without this, the central claim cannot be made

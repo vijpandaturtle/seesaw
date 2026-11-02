@@ -1,4 +1,4 @@
-"""What each pathway takes as input, for running one as a job.
+"""What each pathway takes as input, for running one inside a job.
 
 The job store, the worker and the dashboard all need to know a pathway's
 inputs without importing torch, so they live here rather than being read off
@@ -7,12 +7,20 @@ import the experiment stack, and only when a job actually runs.
 
 Every pathway is given aligned lists: one positive/negative token per prompt,
 and one contrast prompt per prompt where it takes them. `validate` checks
-that before a job is queued, so a malformed request fails at the API rather
-than minutes later in the worker.
+that; `check_inputs` also checks every answer token is one token for the
+model.
+
+A research job names a pathway, and the pathway is binding: Scout only
+chooses its inputs. `scout_brief` tells Scout what they are, and
+`extract_inputs` reads them back out of the saved plan and checks them. A
+rerun checks the saved inputs again against its own model before queueing.
 """
 
 from __future__ import annotations
 
+import json
+import re
+from functools import lru_cache
 from pathlib import Path
 from typing import NamedTuple
 
@@ -23,6 +31,9 @@ class Pathway(NamedTuple):
     optional: tuple[str, ...] = ()
     # Optional inputs that must line up one-to-one with `prompts` when given.
     aligned_optional: tuple[str, ...] = ()
+    # Bump when a change to the pathway's steps or thresholds would change its
+    # verdict on the same inputs: results are only comparable within a version.
+    version: str = "1"
 
 
 PATHWAYS: dict[str, Pathway] = {
@@ -46,6 +57,26 @@ PATHWAYS: dict[str, Pathway] = {
 
 # Inputs that have to line up with `prompts`, entry for entry.
 _ALIGNED = ("positive_tokens", "negative_tokens", "counterfactual_prompts")
+
+# Inputs that are answer tokens, scored as one vocab id each.
+_TOKENS = ("positive_tokens", "negative_tokens")
+
+# What each input means, for Scout choosing them. Pathways share names, so one
+# table covers all three.
+INPUTS: dict[str, str] = {
+    "prompts": "prompts the behaviour shows up on; each ends right before the answer token",
+    "positive_tokens": "the correct (or attribute-consistent) next token, one per prompt",
+    "negative_tokens": "the distractor (or attribute-opposite) next token, one per prompt",
+    "corrupted_prompts": "the same prompt with the key information changed (e.g. IOI with the "
+                         "repeated name swapped), one per prompt, same token length",
+    "reference_prompts": "prompts from a neutral distribution (e.g. IOI's ABC prompts) used as "
+                         "ablation means, one per prompt; defaults to the prompts",
+    "counterfactual_prompts": "the same prompt with the attribute swapped (e.g. 'nurse' -> "
+                              "'engineer'), one per prompt",
+    "control_prompts": "attribute-free prompts ('The person said that') showing the model's "
+                       "baseline preference; any number",
+    "control_texts": "ordinary text for checking an edit doesn't damage the model; any number",
+}
 
 # feature_explain's SAE. Fixed for now: it's the one the known-answer test uses.
 SAE_RELEASE, SAE_ID = "gpt2-small-res-jb", "blocks.8.hook_resid_pre"
@@ -87,6 +118,143 @@ def validate(name: str, params: dict, model: str = "gpt2") -> list[str]:
     if name == "feature_explain" and model not in SAE_MODELS:
         errors.append(f"feature_explain only runs on gpt2 (its SAE is {SAE_RELEASE}), not {model!r}")
     return errors
+
+
+def check_inputs(name: str, params: dict, model: str = "gpt2") -> list[str]:
+    """Everything stopping these inputs running on this model, tokenizer included."""
+    return validate(name, params, model) or token_errors(params, model)
+
+
+def version(name: str) -> str:
+    return PATHWAYS[name].version
+
+
+def scout_brief(name: str, model: str = "gpt2") -> str:
+    """Tell Scout which pathway will run and what it has to choose.
+
+    The pathway is fixed: Scout's job is only to pick its inputs, written as
+    one fenced json block in the plan, which `extract_inputs` reads back.
+    """
+    pathway = PATHWAYS[name]
+
+    def describe(key: str, kind: str) -> str:
+        return f"- `{key}` ({kind}): {INPUTS[key]}."
+
+    lines = [
+        f"## Required pathway: `{name}` (version {pathway.version})",
+        "",
+        f"This job must run the hand-coded `{name}` pathway on {model}: {pathway.summary}.",
+        "Lens runs it first, exactly as you specify it, so the result is comparable across",
+        "models. You do not design its steps; you choose its inputs. You may still propose",
+        "extra experiments in the plan; they will be run after the pathway and labelled extras.",
+        "",
+        "Inputs:",
+        *(describe(k, "required") for k in pathway.required),
+        *(describe(k, "optional") for k in pathway.optional),
+        "",
+        "Rules for the inputs:",
+        "- Every value is a list of strings. \"One per prompt\" means exactly as many entries",
+        "  as `prompts`, in the same order.",
+        "- Answer tokens need a leading space (\" Mary\", not \"Mary\") and must each be a",
+        f"  single token in {model}'s tokenizer; prefer short, common words.",
+        "- Each prompt should end right before the answer, so the answer is the next token.",
+        "- Use at least 8 prompts where the task allows it; vary names and wording.",
+    ]
+    if name == "feature_explain":
+        lines.append(f"- This pathway only runs on gpt2 (its SAE is {SAE_RELEASE}).")
+    lines += [
+        "",
+        "Put the inputs in the plan you save, as exactly one fenced ```json block of the form:",
+        "",
+        "```json",
+        json.dumps({"pathway": name, "params": {k: ["..."] for k in pathway.required}}),
+        "```",
+        "",
+        "The block is checked before the job continues; if it is invalid you will be told why",
+        "and asked to save a corrected plan.",
+    ]
+    return "\n".join(lines)
+
+
+_JSON_BLOCK = re.compile(r"```json\s*\n(.*?)\n\s*```", re.DOTALL)
+
+
+def extract_inputs(name: str, plan_text: str, model: str = "gpt2") -> tuple[dict | None, list[str]]:
+    """Read the pathway inputs Scout wrote into its plan, and check them.
+
+    Returns:
+        (params, []) when they can run, else (None, everything wrong with them).
+    """
+    blocks = []
+    for raw in _JSON_BLOCK.findall(plan_text):
+        try:
+            value = json.loads(raw)
+        except json.JSONDecodeError as exc:
+            return None, [f"the ```json block is not valid JSON: {exc}"]
+        if isinstance(value, dict) and "params" in value:
+            blocks.append(value)
+    if not blocks:
+        return None, ['no ```json block with {"pathway": ..., "params": {...}} found in the plan']
+    if len(blocks) > 1:
+        return None, [f"found {len(blocks)} pathway ```json blocks; write exactly one"]
+
+    block = blocks[0]
+    if block.get("pathway") != name:
+        return None, [f"the block names pathway {block.get('pathway')!r}, but this job runs {name!r}"]
+    params = block["params"]
+    errors = check_inputs(name, params, model)
+    return (None, errors) if errors else (params, [])
+
+
+def without_inputs(plan_text: str) -> str:
+    """The plan with its pathway ```json block replaced by a one-line note.
+
+    For Lens, once the pathway has run: left in, its prompts read like one
+    more experiment to run. Other json blocks are left alone.
+    """
+    def replace(match: re.Match) -> str:
+        try:
+            value = json.loads(match.group(1))
+        except json.JSONDecodeError:
+            return match.group(0)
+        if isinstance(value, dict) and "params" in value:
+            return "_(Pathway inputs removed: the pathway has already been run on them.)_"
+        return match.group(0)
+
+    return _JSON_BLOCK.sub(replace, plan_text)
+
+
+def token_errors(params: dict, model: str) -> list[str]:
+    """Answer tokens that aren't one token for this model's tokenizer.
+
+    Loads only the tokenizer, not the weights. Returns [] (skipping the
+    check) when the tokenizer can't be loaded, e.g. offline: the pathway
+    itself still refuses multi-token answers when it runs.
+    """
+    tokenizer = _tokenizer(model)
+    if tokenizer is None:
+        return []
+    errors = []
+    for key in _TOKENS:
+        for token in params.get(key) or []:
+            ids = tokenizer.encode(token, add_special_tokens=False)
+            if len(ids) != 1:
+                pieces = tokenizer.convert_ids_to_tokens(ids)
+                errors.append(f"{key} entry {token!r} is {len(ids)} tokens for {model} ({pieces}); "
+                              "pick a single-token word, with a leading space")
+    return errors
+
+
+@lru_cache(maxsize=8)
+def _tokenizer(model: str):
+    try:
+        from transformer_lens.loading_from_pretrained import get_official_model_name
+        from transformers import AutoTokenizer
+
+        return AutoTokenizer.from_pretrained(get_official_model_name(model))
+    except Exception as exc:                         # noqa: BLE001 — the check is best-effort
+        print(f"   (skipping single-token check: no tokenizer for {model}: {exc})")
+        return None
 
 
 def run_from_params(name: str, model_name: str, params: dict, output_dir: Path):

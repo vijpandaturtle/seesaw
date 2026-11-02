@@ -4,6 +4,7 @@ from pathlib import Path
 
 from lens.mcp_server.src.config.settings import OUTPUTS_DIR
 from lens.mcp_server.src.workflows.lens_workflow import build_lens_graph
+from shared.db import events
 
 
 def run_lens(
@@ -29,7 +30,7 @@ def run_lens(
         RuntimeError: If the workflow completes without a bundle.
     """
     graph  = build_lens_graph()
-    config = {"configurable": {"thread_id": thread_id}}
+    config = {"configurable": {"thread_id": thread_id}, "callbacks": events.callbacks()}
 
     print("🔬 Lens starting experiments...")
 

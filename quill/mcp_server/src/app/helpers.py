@@ -3,8 +3,10 @@ from ..models.schemas import CritiqueReport, ExperimentBundle, ExperimentResult
 
 def format_result_for_context(result: ExperimentResult) -> str:
     """Format a single ExperimentResult as a markdown section for LLM context."""
+    heading = {"pathway": "Pathway result (primary evidence)",
+               "extra": "Extra experiment"}.get(result.role, "Experiment")
     lines = [
-        f"### Experiment: {result.name}",
+        f"### {heading}: {result.name}",
         f"- **Tool**: `{result.tool}`",
         f"- **Model**: {result.model_name}",
         f"- **Status**: {result.status}",
@@ -18,7 +20,9 @@ def format_result_for_context(result: ExperimentResult) -> str:
             lines.append(f"  - `{k}`: {str(v)[:200]}")
     if result.data:
         lines += ["", "**Key measurements**:"]
-        for k, v in list(result.data.items())[:8]:
+        # A pathway's findings are its conclusion; show all of them.
+        items = list(result.data.items())
+        for k, v in (items if result.role == "pathway" else items[:8]):
             lines.append(f"  - `{k}`: {str(v)[:200]}")
     if result.error:
         lines.append(f"**Error**: {result.error}")
@@ -33,6 +37,9 @@ def bundle_to_context(bundle: ExperimentBundle) -> str:
         f"Experiments: {len(bundle.successful)} successful, {len(bundle.failed)} failed",
         "",
     ]
+    if any(r.role == "pathway" for r in bundle.results):
+        parts.append("The first result is a hand-coded pathway run on pre-approved inputs: it is "
+                     "the primary evidence. Everything after it is an extra Lens chose to run.\n")
     parts += [format_result_for_context(r) for r in bundle.successful]
 
     if bundle.failed:
