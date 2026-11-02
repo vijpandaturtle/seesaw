@@ -9,7 +9,8 @@ the work continues here — so there is no always-on machine and nothing to poll
 
 Scout, Quill, and Lens's graph run in this container. The five Lens experiment
 tools do not: SEESAW_LENS_BACKEND=modal sends those to the GPU app in
-lens/modal_app.py, so this one stays on CPU.
+lens/modal_app.py, so this one stays on CPU. A job's pathway (seesaw.pathways)
+does run here, on CPU: fine for GPT-2-sized models, slow for larger ones.
 
 Artifacts go to a Volume rather than the container filesystem, which is
 discarded when the function returns, and `artifacts` serves them back to the
@@ -37,6 +38,8 @@ image = (
         "numpy",
         "matplotlib",
         "transformer-lens",
+        # feature_explain's SAE.
+        "sae-lens==6.44.4",
     )
     .pip_install(
         "python-dotenv",
@@ -64,7 +67,9 @@ image = (
             "MPLCONFIGDIR": "/tmp/mpl",
         }
     )
-    .add_local_python_source("scout", "quill", "lens", "orchestrator", "shared")
+    # seesaw: the pathways, their catalog (Scout's input checks) and the
+    # interp library they call.
+    .add_local_python_source("scout", "quill", "lens", "orchestrator", "shared", "seesaw")
 )
 
 artifacts = modal.Volume.from_name("seesaw-artifacts", create_if_missing=True)
