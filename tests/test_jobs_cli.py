@@ -59,6 +59,41 @@ def test_submit_queues_a_job_and_starts_a_local_worker(jobs, launched, monkeypat
     assert job.id in capsys.readouterr().out
 
 
+def test_submit_can_name_a_pathway(jobs, launched, monkeypatch, capsys):
+    argv = ("jobs", "submit", "which heads do IOI?", "--pathway", "circuit_discovery",
+            "--runner", "queue")
+    assert seesaw(monkeypatch, *argv) == 0
+    [job] = jobs.list_jobs()
+    assert job.params_dict == {"pathway": "circuit_discovery"}
+
+    assert seesaw(monkeypatch, "jobs", "submit", "q", "--pathway", "nope", "--runner", "queue") == 1
+    assert "unknown pathway 'nope'" in capsys.readouterr().err
+
+
+def test_rerun_queues_the_approved_inputs_at_lens(jobs, launched, monkeypatch, capsys, tmp_path):
+    import json
+
+    from seesaw.pathways import catalog
+
+    monkeypatch.setattr(catalog, "_tokenizer", lambda model: None)
+    inputs = {"prompts": ["When Mary and John went to the store, John gave a drink to"],
+              "positive_tokens": [" Mary"], "negative_tokens": [" John"]}
+    job = jobs.create("IOI", params={"pathway": "circuit_discovery"})
+    jobs.update(job.id, stage="quill", plan_path=str(tmp_path / "plan.md"),
+                params=json.dumps({"pathway": "circuit_discovery", "pathway_params": inputs}))
+
+    argv = ("jobs", "rerun", job.id, "--model", "pythia-70m", "--runner", "queue")
+    assert seesaw(monkeypatch, *argv) == 0
+    again = next(j for j in jobs.list_jobs() if j.id != job.id)
+    assert (again.stage, again.status, again.model) == ("lens", jobs.QUEUED, "pythia-70m")
+    assert again.params_dict["rerun_of"] == job.id
+    assert f"reruns {job.id}'s circuit_discovery on pythia-70m" in capsys.readouterr().out
+
+    fresh = jobs.create("q")
+    assert seesaw(monkeypatch, "jobs", "rerun", fresh.id, "--runner", "queue") == 1
+    assert "no approved pathway inputs" in capsys.readouterr().err
+
+
 def test_queue_runner_starts_nothing(jobs, launched, monkeypatch, capsys):
     seesaw(monkeypatch, "jobs", "submit", "q", "--runner", "queue")
     assert launched == []

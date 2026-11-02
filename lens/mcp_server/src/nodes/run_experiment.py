@@ -1,4 +1,5 @@
 import inspect
+import time
 from pathlib import Path
 
 from ..app.model_session import get_model, retire_model
@@ -6,6 +7,7 @@ from ..app.remote import is_remote, run_experiment_remote
 from ..app.sandbox import run_in_sandbox
 from ..config import PLOTS_DIR, SANDBOX_TIMEOUT, SWEEP_TIMEOUT, SWEEP_TOOLS
 from ..models.schemas import ExperimentResult
+from shared.db import events
 from shared.lens_tools import active_backend
 
 from ..tools import expand_pairings, normalize_tool_kwargs, registry
@@ -22,6 +24,7 @@ def run_experiment(state: dict) -> dict:
     missing arguments, rather than as a bare TypeError from inside the call.
     Separate prompt and image lists are expanded to every pairing first.
     """
+    t0    = time.perf_counter()
     queue = list(state["experiment_queue"])
     plots_dir = Path(state["output_dir"]) / "plots" if state.get("output_dir") else PLOTS_DIR
     spec  = queue.pop(0)
@@ -98,6 +101,18 @@ def run_experiment(state: dict) -> dict:
     print(f"   {icon} {result.status} | plots={len(result.plot_paths)}")
     if result.status != "success" and result.error:
         print(f"   ↳ {result.error[:300]}")
+    events.emit(
+        events.EXPERIMENT, spec["name"],
+        status=events.OK if result.status == "success" else events.FAILED,
+        duration_ms=(time.perf_counter() - t0) * 1000,
+        summary=(f"{spec['tool']} on {len(spec['prompts'])} prompt(s): {result.status}, "
+                 f"{len(result.plot_paths)} plot(s)"
+                 + (f" — {result.error[:200]}" if result.error else "")),
+        data={"tool": spec["tool"], "model": spec["model_name"], "prompts": spec["prompts"],
+              "tool_kwargs": result.tool_kwargs, "status": result.status,
+              "error": result.error, "plot_paths": [str(p) for p in result.plot_paths],
+              "data": result.data},
+    )
     return {
         "experiment_queue": queue,
         "last_result": result.__dict__ | {"plot_paths": [str(p) for p in result.plot_paths]},

@@ -24,6 +24,9 @@ PLOTS_DIR.mkdir(parents=True, exist_ok=True)
 # ── Model ─────────────────────────────────────────────────────────────────────
 LENS_LLM_MODEL: str = "claude-sonnet-4-5"
 LENS_LLM_MAX_TOKENS: int = 2_000
+# parse_plan writes every experiment as structured output, with its prompts,
+# corrupted pairs and tokens; 2k cut long plans off mid-list.
+LENS_PARSE_MAX_TOKENS: int = 8_000
 LENS_LLM_TEMPERATURE: float = 0.0
 
 # ── TransformerLens model loading ─────────────────────────────────────────────

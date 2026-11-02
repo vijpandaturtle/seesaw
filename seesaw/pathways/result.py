@@ -2,10 +2,52 @@
 
 from __future__ import annotations
 
+import contextlib
+import time
 from dataclasses import dataclass, field
 from pathlib import Path
+from typing import Callable
 
 from seesaw.interp.result import InterpResult
+
+# Called as each step's result is recorded: (pathway, step, result, seconds
+# since the previous step was recorded). The job worker listens to put
+# pathway steps on a job's timeline as they happen.
+StepListener = Callable[[str, str, InterpResult, float], None]
+_listeners: list[StepListener] = []
+
+
+@contextlib.contextmanager
+def listening(listener: StepListener):
+    """Call `listener` for every pathway step recorded inside the block."""
+    _listeners.append(listener)
+    try:
+        yield
+    finally:
+        _listeners.remove(listener)
+
+
+class _Steps(dict):
+    """A step dict that tells listeners about each step as it's recorded.
+
+    Pathways run their steps in order and record each one as it finishes, so
+    the time since the previous one is (close to) how long the step took.
+    """
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.pathway = ""
+        self._last = time.perf_counter()
+
+    def __setitem__(self, name, result):
+        super().__setitem__(name, result)
+        now = time.perf_counter()
+        seconds, self._last = now - self._last, now
+        for listener in list(_listeners):
+            try:
+                listener(self.pathway, name, result, seconds)
+            except Exception:                         # noqa: BLE001 — a listener can't stop a pathway
+                pass
 
 
 @dataclass
@@ -25,11 +67,16 @@ class PathwayResult:
     """
 
     pathway: str
-    steps: dict[str, InterpResult] = field(default_factory=dict)
+    steps: dict[str, InterpResult] = field(default_factory=_Steps)
     findings: dict = field(default_factory=dict)
     verdict: str | None = None
     evidence: list[str] = field(default_factory=list)
     stopped_early: str | None = None
+
+    def __post_init__(self):
+        if not isinstance(self.steps, _Steps):
+            self.steps = _Steps(self.steps)
+        self.steps.pathway = self.pathway
 
     @property
     def plot_paths(self) -> list[Path]:

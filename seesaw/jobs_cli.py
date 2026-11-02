@@ -1,6 +1,7 @@
 """`seesaw jobs …` — submit and drive jobs in the shared job store from a terminal.
 
-    seesaw jobs submit "<question>" [--model M] [--auto-approve] [--follow]
+    seesaw jobs submit "<question>" [--pathway P] [--model M] [--auto-approve] [--follow]
+    seesaw jobs rerun <id> [--model M] [--auto-approve] [--follow]
     seesaw jobs list [--limit N] [--json]
     seesaw jobs show <id> [--json]
     seesaw jobs approve <id> [--follow]
@@ -12,6 +13,10 @@
 Unlike `seesaw run`, which runs the pipeline in this process and records
 nothing, these go through the same job store the dashboard reads: a job
 submitted here shows up there, and one queued there can be approved here.
+
+`--pathway` makes one of seesaw.pathways part of the job; Scout chooses its
+inputs. `rerun` runs that pathway again on the same approved inputs, from
+Lens, optionally on another model: the reproducible part of a job.
 
 Who executes a stage is the runner, chosen like the dashboard chooses it:
 
@@ -117,6 +122,10 @@ def _describe(job) -> str:
         f"status   {job.status} at {job.stage}" + ("  (auto-approve)" if job.auto_approve else ""),
         f"updated  {_age(job.updated_at)} ago",
     ]
+    params = job.params_dict
+    if params.get("pathway"):
+        lines.append(f"pathway  {params['pathway']}"
+                     + (f"  (rerun of {params['rerun_of']})" if params.get("rerun_of") else ""))
     for label, path in (("plan", job.plan_path), ("bundle", job.bundle_path), ("report", job.report_path)):
         if path:
             lines.append(f"{label:8s} {path}")
@@ -224,11 +233,30 @@ def _approve(job_id: str, runner: str) -> bool:
 
 
 def cmd_submit(args) -> int:
-    job = _jobs().create(args.question, model=args.model, auto_approve=args.auto_approve)
+    try:
+        job = _jobs().create(args.question, model=args.model, auto_approve=args.auto_approve,
+                             params={"pathway": args.pathway} if args.pathway else None)
+    except ValueError as exc:
+        print(exc, file=sys.stderr)
+        return 1
     used = start_stage(job.id, args.runner)
     print(f"job {job.id} queued at scout; runner: {used}\nweb: {_web_url(job.id)}")
     if used == "queue":
         print("nothing will run it until a poller claims it: python -m orchestrator.src.worker --poll")
+    return follow(job.id, args.runner) if args.follow else 0
+
+
+def cmd_rerun(args) -> int:
+    if _get(args.job_id) is None:
+        return 1
+    try:
+        job = _jobs().rerun(args.job_id, model=args.model, auto_approve=args.auto_approve)
+    except ValueError as exc:
+        print(exc, file=sys.stderr)
+        return 1
+    used = start_stage(job.id, args.runner)
+    print(f"job {job.id} reruns {args.job_id}'s {job.params_dict['pathway']} on {job.model}, "
+          f"queued at lens; runner: {used}\nweb: {_web_url(job.id)}")
     return follow(job.id, args.runner) if args.follow else 0
 
 
@@ -314,6 +342,8 @@ def add_parser(sub) -> None:
 
     p = js.add_parser("submit", help="create a job and start its first stage")
     p.add_argument("question")
+    p.add_argument("--pathway", help="run this seesaw pathway as part of the job; Scout chooses its "
+                                     "inputs (circuit_discovery, attribute_audit, feature_explain)")
     p.add_argument("--model", default="gpt2", help="model Lens should target (default: gpt2)")
     p.add_argument("--auto-approve", action="store_true", help="run all stages without approval gates")
     runner_arg(p)
@@ -341,6 +371,14 @@ def add_parser(sub) -> None:
     runner_arg(p)
     follow_arg(p)
     p.set_defaults(fn=cmd_retry)
+
+    p = js.add_parser("rerun", help="run a job's pathway again on its approved inputs, from Lens")
+    p.add_argument("job_id")
+    p.add_argument("--model", help="run on this model instead (default: the job's own)")
+    p.add_argument("--auto-approve", action="store_true", help="go on to Quill without its gate")
+    runner_arg(p)
+    follow_arg(p)
+    p.set_defaults(fn=cmd_rerun)
 
     p = js.add_parser("cancel", help="stop a job")
     p.add_argument("job_id")

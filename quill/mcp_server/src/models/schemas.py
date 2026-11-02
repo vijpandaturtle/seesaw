@@ -20,6 +20,9 @@ class ExperimentResult:
     status: Literal["success", "failed", "timeout"] = "success"
     error: str | None = None
     tool_kwargs: dict = field(default_factory=dict)   # what the tool actually ran with
+    # Set by the worker on a pathway job: "pathway" for the binding pathway's
+    # result (the primary evidence), "extra" for experiments Lens chose.
+    role: str | None = None
 
 
 @dataclass

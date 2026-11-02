@@ -1,5 +1,13 @@
-"""Run a job's stages: Scout → Lens → Quill for a research job, or one
-pathway from seesaw.pathways for a pathway job.
+"""Run a job's stages: Scout → Lens → Quill.
+
+A job that names a pathway (params = {"pathway": name}) runs it as part of
+the research, and the pathway is binding: Scout only chooses its inputs,
+which are checked (and sent back to Scout to fix, at most twice) and saved as
+params["pathway_params"] for the human gate to show. Lens's stage then runs
+the pathway on exactly those inputs before any of Lens's own experiments,
+which are labelled extras, so the same pathway on the same kind of inputs
+gives results comparable across models. A rerun (jobs.rerun) starts at Lens
+with those inputs already saved, so they're checked again against its model.
 
     python -m orchestrator.src.worker <job_id>   one job, then exit
     python -m orchestrator.src.worker --poll     claim queued jobs forever
@@ -20,7 +28,9 @@ can run at once; claims are atomic, so no two take the same job.
 
 Everything printed here (and by the agents) goes to the job's log file
 under outputs/job_logs/, mirrored into the row by jobs.sync_log so a
-remote dashboard can read it.
+remote dashboard can read it. Alongside it, each stage records a structured
+timeline (shared/db/events.py): the agents' nodes, LLM calls and tool calls,
+Lens's experiments and the pathway's steps, written as they happen.
 """
 
 from __future__ import annotations
@@ -34,7 +44,7 @@ import traceback
 
 from dotenv import load_dotenv
 
-from shared.db import jobs
+from shared.db import events, jobs
 from shared.db.jobs import Job
 
 # Lens honours the plan's stated model, so the UI's choice is appended as
@@ -44,13 +54,48 @@ _MODEL_OVERRIDE = (
 )
 
 
+# Lens runs the plan's experiments after the pathway has already run; this
+# tells it not to redo the pathway and what its own experiments are for.
+_PATHWAY_DONE = (
+    "\n\n**Pathway already run**: the `{name}` pathway (version {version}) has already been run "
+    "on the approved inputs; its verdict was `{verdict}`. Do not re-run it, and do not use its "
+    "prompts for an experiment unless the plan lists that experiment on its own. The experiments "
+    "you run are extras that add to that result.\n"
+)
+
+
 # ── Stages ───────────────────────────────────────────────────────────────────
 def run_scout_stage(job: Job) -> None:
-    from .clients.scout_client import run_scout
+    from .clients.scout_client import MAX_REVISIONS, run_scout
+
+    params = job.params_dict
+    name = params.get("pathway")
+    if not name:
+        plan_path = run_scout(job.question, thread_id=f"job-{job.id}-scout",
+                              output_dir=jobs.job_dir(job.id))
+        jobs.update(job.id, plan_path=str(plan_path))
+        return
+
+    from pathlib import Path
+
+    from seesaw.pathways import catalog
+
+    def check(path: Path) -> list[str]:
+        return catalog.extract_inputs(name, path.read_text(), job.model)[1]
 
     plan_path = run_scout(job.question, thread_id=f"job-{job.id}-scout",
-                          output_dir=jobs.job_dir(job.id))
-    jobs.update(job.id, plan_path=str(plan_path))
+                          output_dir=jobs.job_dir(job.id),
+                          brief=catalog.scout_brief(name, job.model), check=check)
+    inputs, errors = catalog.extract_inputs(name, plan_path.read_text(), job.model)
+    # Inputs from an earlier Scout run don't belong to this plan.
+    params.pop("pathway_params", None)
+    if errors:
+        jobs.update(job.id, plan_path=str(plan_path), params=json.dumps(params))
+        raise RuntimeError(f"Scout's {name} inputs are still invalid after "
+                           f"{MAX_REVISIONS} revisions: " + "; ".join(errors))
+    params["pathway_params"] = inputs
+    jobs.update(job.id, plan_path=str(plan_path), params=json.dumps(params))
+    print(f"   {name} inputs validated: {len(inputs['prompts'])} prompts")
 
 
 def run_lens_stage(job: Job) -> None:
@@ -62,15 +107,46 @@ def run_lens_stage(job: Job) -> None:
     from pathlib import Path
 
     plan_text = Path(job.plan_path).read_text()
+    params = job.params_dict
+    if params.get("pathway"):
+        from seesaw.pathways import catalog
+
+        # Lens gets the plan without the pathway's inputs, so it can't take
+        # the pathway's prompts for one more experiment.
+        plan_text = catalog.without_inputs(plan_text)
+    plan_text += _MODEL_OVERRIDE.format(model=job.model)
+
+    # A pathway job runs its pathway first, on exactly the approved inputs.
+    pathway = None
+    if params.get("pathway"):
+        if "pathway_params" not in params:
+            raise RuntimeError("this job's pathway has no approved inputs — "
+                               "Scout stage did not save them")
+        from seesaw.pathways import catalog
+
+        # A rerun may have moved the inputs to another model; refuse them here,
+        # with the reason, rather than inside the pathway.
+        problems = catalog.check_inputs(params["pathway"], params["pathway_params"], job.model)
+        if problems:
+            raise RuntimeError(f"the approved {params['pathway']} inputs can't run on "
+                               f"{job.model}: " + "; ".join(problems))
+        pathway = _run_pathway_once(job, params["pathway"], params["pathway_params"])
+        plan_text += _PATHWAY_DONE.format(name=pathway["pathway"], version=pathway["version"],
+                                          verdict=pathway["verdict"])
+
     bundle, bundle_path = run_lens(
-        plan_text + _MODEL_OVERRIDE.format(model=job.model),
+        plan_text,
         thread_id=f"job-{job.id}-lens",
         output_dir=jobs.job_dir(job.id),
     )
+    if pathway is not None:
+        bundle = _with_pathway(bundle, pathway)
+        bundle_path.write_text(json.dumps(bundle, indent=2, default=str))
     jobs.update(job.id, bundle_path=str(bundle_path))
     print(f"   {bundle['n_success']}/{bundle['n_total']} experiments succeeded")
     # Nothing for Quill to critique: fail here, where retry re-runs Lens,
     # rather than parking the job at a gate in front of an empty bundle.
+    # (A pathway job always has the pathway's result to critique.)
     if bundle["n_total"] and not bundle["n_success"]:
         first = next((r.get("error") for r in bundle.get("results", []) if r.get("error")), None)
         raise RuntimeError(f"no experiment succeeded ({bundle['n_total']} failed)"
@@ -91,37 +167,111 @@ def run_quill_stage(job: Job) -> None:
     print(f"   assessment: {report.overall_assessment}")
 
 
-def run_pathway_stage(job: Job) -> None:
-    """Run a hand-coded pathway on the job's inputs.
+def _run_pathway(job: Job, name: str, params: dict) -> dict:
+    """Run a pathway into the job's pathway/ folder; return what it saved.
 
-    Writes the pathway's one-page report as the job's report, and its verdict,
-    evidence, findings and plots as the job's bundle (JSON), so the dashboard
-    can show them without parsing markdown.
+    pathway/result.json carries the name, version, model and inputs next to
+    the verdict, so a reader (or a later retry) knows exactly what produced it.
     """
     from seesaw.pathways import catalog
 
-    params = job.params_dict
-    name = params.pop("pathway", None)
     out = jobs.job_dir(job.id) / "pathway"
     out.mkdir(parents=True, exist_ok=True)
 
-    print(f"   pathway {name} on {job.model}")
-    result = catalog.run_from_params(name, job.model, params, out)
+    from seesaw.pathways.result import listening
 
-    report_path = out / "report.md"
-    report_path.write_text(result.to_markdown())
-    bundle_path = out / "result.json"
-    bundle_path.write_text(json.dumps({
+    print(f"   pathway {name} on {job.model}")
+    with events.span(events.PATHWAY, name, data={"version": catalog.version(name),
+                                                 "model": job.model, "params": params}) as s, \
+            listening(_record_step):
+        result = catalog.run_from_params(name, job.model, params, out)
+        s.summary = f"verdict: {result.verdict}" + (
+            f" (stopped early: {result.stopped_early})" if result.stopped_early else "")
+        s.data.update(verdict=result.verdict, evidence=result.evidence)
+
+    (out / "report.md").write_text(result.to_markdown())
+    saved = {
         "pathway": result.pathway,
+        "version": catalog.version(name),
+        "model": job.model,
+        "params": params,
         "verdict": result.verdict,
         "evidence": result.evidence,
         "findings": result.findings,
         "stopped_early": result.stopped_early,
         "steps": list(result.steps),
         "plot_paths": [str(p) for p in result.plot_paths],
-    }, indent=2, default=_jsonable))
-    jobs.update(job.id, report_path=str(report_path), bundle_path=str(bundle_path))
+    }
+    # Round-trip so the caller gets the same plain values a reload would.
+    text = json.dumps(saved, indent=2, default=_jsonable)
+    (out / "result.json").write_text(text)
     print(f"   verdict: {result.verdict}")
+    return json.loads(text)
+
+
+def _run_pathway_once(job: Job, name: str, params: dict) -> dict:
+    """The pathway's saved result when it matches, else a fresh run.
+
+    A retried Lens stage would otherwise recompute a deterministic result it
+    already has. It only counts when it came from this pathway, at this
+    version, on this model and these exact inputs.
+    """
+    from seesaw.pathways import catalog
+
+    path = jobs.job_dir(job.id) / "pathway" / "result.json"
+    if path.exists():
+        saved = json.loads(path.read_text())
+        if (saved.get("pathway"), saved.get("version"), saved.get("model"), saved.get("params")) == (
+                name, catalog.version(name), job.model, params):
+            print(f"   reusing saved {name} result (verdict: {saved['verdict']})")
+            events.emit(events.PATHWAY, name, summary=f"reused the saved result "
+                        f"(verdict: {saved['verdict']}): same pathway, version, model and inputs")
+            return saved
+    return _run_pathway(job, name, params)
+
+
+def _record_step(pathway: str, step: str, result, seconds: float) -> None:
+    """Put one pathway step on the job's timeline as it finishes."""
+    data = getattr(result, "data", None) or {}
+    plots = [str(p) for p in getattr(result, "plot_paths", [])]
+    scalars = [f"{k}={v:.3g}" if isinstance(v, float) else f"{k}={v}"
+               for k, v in data.items() if isinstance(v, (int, float, str)) and not isinstance(v, bool)
+               and len(str(v)) < 40][:4]
+    events.emit(events.STEP, step, duration_ms=seconds * 1000,
+                summary=", ".join(scalars + ([f"{len(plots)} plot(s)"] if plots else [])) or None,
+                data={"pathway": pathway, "data": data, "plot_paths": plots})
+
+
+def _with_pathway(bundle: dict, pathway: dict) -> dict:
+    """Put the pathway's result first in Lens's bundle, as the primary evidence.
+
+    It takes the shape of a Lens experiment result so Quill reads it like any
+    other, with `role` telling the two apart: "pathway" for this one, "extra"
+    for everything Lens chose to run.
+    """
+    entry = {
+        "name": f"pathway:{pathway['pathway']}",
+        "tool": f"{pathway['pathway']}@v{pathway['version']}",
+        "role": "pathway",
+        "model_name": pathway["model"],
+        "prompts": pathway["params"].get("prompts", []),
+        "summary": f"Verdict: {pathway['verdict']}. " + " ".join(pathway["evidence"]),
+        "plot_paths": pathway["plot_paths"],
+        "data": {"verdict": pathway["verdict"], "stopped_early": pathway["stopped_early"],
+                 "steps": pathway["steps"], **pathway["findings"]},
+        "status": "success",
+        "error": None,
+        "tool_kwargs": pathway["params"],
+    }
+    results = [entry] + [{**r, "role": "extra"} for r in bundle.get("results", [])]
+    return {
+        **bundle,
+        "pathway": pathway,
+        "results": results,
+        "n_total": len(results),
+        "n_success": sum(1 for r in results if r["status"] == "success"),
+        "n_failed": sum(1 for r in results if r["status"] != "success"),
+    }
 
 
 def _jsonable(value):
@@ -137,7 +287,6 @@ STAGE_FNS = {
     "scout":   run_scout_stage,
     "lens":    run_lens_stage,
     "quill":   run_quill_stage,
-    "pathway": run_pathway_stage,
 }
 
 
@@ -160,39 +309,64 @@ def run_job(job_id: str, worker_id: str | None = None) -> int:
             print(f"job {job_id} is {current.status} at stage {current.stage} — nothing to run")
             return 0
 
-        if jobs.cancel_requested(job_id):
-            print("job cancelled before stage started")
-            jobs.update(job_id, status=jobs.CANCELLED, pid=None)
-            return 0
+        with events.bind(job_id, job.stage):
+            code = _run_stage(job, worker_id)
+        if code is not None:
+            return code
 
-        print(f"\n▶ stage: {job.stage}")
-        try:
-            STAGE_FNS[job.stage](job)
-        except Exception as exc:                     # noqa: BLE001 — reported to the UI
-            traceback.print_exc()
-            jobs.update(job.id, status=jobs.FAILED,
-                        error=f"{job.stage}: {type(exc).__name__}: {exc}"[:1000],
-                        pid=None)
-            jobs.sync_log(job_id)
-            return 1
 
-        # Re-read: the stage wrote artifact paths, and the user may have
-        # asked to cancel while it ran.
-        job = jobs.get(job_id)
-        if job is None or job.status == jobs.CANCELLED or job.cancel_requested:
-            print("job cancelled during stage")
-            jobs.update(job_id, status=jobs.CANCELLED, pid=None)
-            jobs.sync_log(job_id)
-            return 0
+def _run_stage(job: Job, worker_id: str) -> int | None:
+    """Run the claimed stage. Returns an exit code, or None to run the next one."""
+    job_id = job.id
+    if jobs.cancel_requested(job_id):
+        print("job cancelled before stage started")
+        jobs.update(job_id, status=jobs.CANCELLED, pid=None)
+        events.emit(events.STATUS, jobs.CANCELLED, summary="cancelled before the stage started")
+        return 0
 
-        jobs.advance(job)
-        after = jobs.get(job_id)
-        print(f"✔ stage complete — now {after.status} at {after.stage}")
+    print(f"\n▶ stage: {job.stage}")
+    try:
+        with events.span(events.STAGE, job.stage, data={"worker": worker_id, "model": job.model}):
+            run_stage = STAGE_FNS.get(job.stage)
+            if run_stage is None:
+                # A standalone pathway job, queued before they were retired.
+                raise RuntimeError(f"stage {job.stage!r} is no longer run: a pathway runs inside "
+                                   "a research job; start one that names it, or rerun one")
+            run_stage(job)
+    except Exception as exc:                         # noqa: BLE001 — reported to the UI
+        traceback.print_exc()
+        events.emit(events.ERROR, type(exc).__name__, status=events.FAILED,
+                    summary=str(exc), data={"traceback": traceback.format_exc()})
+        jobs.update(job.id, status=jobs.FAILED,
+                    error=f"{job.stage}: {type(exc).__name__}: {exc}"[:1000],
+                    pid=None)
         jobs.sync_log(job_id)
+        return 1
 
-        if after.status != jobs.QUEUED:
-            jobs.update(job_id, pid=None)
-            return 0
+    # Re-read: the stage wrote artifact paths, and the user may have
+    # asked to cancel while it ran.
+    job = jobs.get(job_id)
+    if job is None or job.status == jobs.CANCELLED or job.cancel_requested:
+        print("job cancelled during stage")
+        jobs.update(job_id, status=jobs.CANCELLED, pid=None)
+        events.emit(events.STATUS, jobs.CANCELLED, summary="cancelled while the stage ran")
+        jobs.sync_log(job_id)
+        return 0
+
+    jobs.advance(job)
+    after = jobs.get(job_id)
+    print(f"✔ stage complete — now {after.status} at {after.stage}")
+    events.emit(events.STATUS, after.status, summary={
+        jobs.AWAITING: f"waiting for approval before {after.stage}",
+        jobs.QUEUED:   f"auto-approved; {after.stage} is next",
+        jobs.DONE:     "every stage finished",
+    }.get(after.status, after.status))
+    jobs.sync_log(job_id)
+
+    if after.status != jobs.QUEUED:
+        jobs.update(job_id, pid=None)
+        return 0
+    return None
 
 
 def poll(worker_id: str | None = None, interval: float = 5.0) -> int:

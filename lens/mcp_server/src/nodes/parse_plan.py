@@ -1,5 +1,6 @@
 from shared.lens_tools import active_backend, bullet_list, planning_notes
 
+from ..config import LENS_PARSE_MAX_TOKENS
 from ..models.schemas import ParsedPlanModel
 from ..tools import (
     prompt_pairs_from_specs, registry, token_defaults_from_specs, tool_kwargs_guide,
@@ -20,7 +21,7 @@ def parse_plan(state: dict) -> dict:
     Node 1 in the Lens workflow.
     """
     print("📋 [parse_plan] Extracting experiments...")
-    llm = make_llm()
+    llm = make_llm(max_tokens=LENS_PARSE_MAX_TOKENS)
     structured_llm = llm.with_structured_output(ParsedPlanModel)
     prompt = (
         f"Extract the experiments from this Research Plan.\n"
