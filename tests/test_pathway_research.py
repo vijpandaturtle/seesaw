@@ -12,6 +12,9 @@ What has to hold:
   * a rerun starts at Lens with the same plan and approved inputs (no Scout),
     runs the pathway afresh, may move it to another model, and refuses
     inputs that can't run there
+  * a rerun's Lens replays the source job's extra experiments as they ran,
+    on the rerun's model, and reads the plan again only when the source's
+    bundle isn't there
 
 Scout's agent, Lens, Quill and the pathway itself are faked; nothing here
 calls an LLM or loads a model.
@@ -20,6 +23,7 @@ calls an LLM or loads a model.
 from __future__ import annotations
 
 import json
+from pathlib import Path
 
 import pytest
 
@@ -116,10 +120,11 @@ def lens(monkeypatch):
     """Fake Lens: one extra experiment. Records the plan text it was given."""
     from orchestrator.src.clients import lens_client
 
-    seen = {"plans": [], "fail": False}
+    seen = {"plans": [], "replays": [], "fail": False}
 
-    def fake_lens(research_plan, thread_id, output_dir):
+    def fake_lens(research_plan, thread_id, output_dir, replay=None):
         seen["plans"].append(research_plan)
+        seen["replays"].append(replay)
         if seen["fail"]:
             raise RuntimeError("Lens fell over")
         bundle = {"research_question": "IOI", "model_name": "gpt2", "n_total": 1,
@@ -380,3 +385,38 @@ def test_only_a_job_with_approved_inputs_can_be_rerun(jobs, scout):
     not_scouted = jobs.create("IOI", params={"pathway": "circuit_discovery"})
     with pytest.raises(ValueError, match="no approved pathway inputs"):
         jobs.rerun(not_scouted.id)
+
+
+def test_a_rerun_replays_the_source_jobs_experiments(jobs, scout, pathway_runs, lens):
+    job_id = scouted(jobs, scout)
+    run_stage(jobs, job_id)
+    assert lens["replays"] == [None]                 # the source read its plan
+
+    again = jobs.rerun(job_id, model="pythia-70m")
+    code, after = run_stage(jobs, again.id)
+    assert code == 0
+    replay = lens["replays"][-1]
+    assert (replay["research_question"], replay["model_name"]) == ("IOI", "pythia-70m")
+    # The extra, as it ran, on the rerun's model; the pathway entry isn't replayed.
+    assert replay["experiments"] == [{"name": "logit_lens_ioi", "tool": "logit_lens",
+                                      "model_name": "pythia-70m", "prompts": IOI["prompts"],
+                                      "tool_kwargs": {}}]
+    bundle = json.loads(open(after.bundle_path).read())
+    assert bundle["replayed_from"] == job_id
+    assert [r["role"] for r in bundle["results"]] == ["pathway", "extra"]
+
+
+def test_a_rerun_reads_the_plan_again_when_the_source_bundle_is_gone(jobs, scout,
+                                                                     pathway_runs, lens):
+    from shared.db import events
+
+    job_id = scouted(jobs, scout)
+    run_stage(jobs, job_id)
+    Path(jobs.get(job_id).bundle_path).unlink()
+
+    again = jobs.rerun(job_id)
+    code, after = run_stage(jobs, again.id)
+    assert code == 0
+    assert lens["replays"][-1] is None
+    note = next(e for e in events.list_events(again.id) if e["kind"] == "note")
+    assert note["status"] == "error" and "reads the plan again" in note["summary"]

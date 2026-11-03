@@ -47,6 +47,7 @@ EXPERIMENT = "experiment"    # one Lens experiment
 PATHWAY    = "pathway"       # one pathway run, around its steps
 STEP       = "step"          # one pathway step
 CHECK      = "check"         # a validation: Scout's pathway inputs
+NOTE       = "note"          # a decision worth seeing: what a rerun replays
 STATUS     = "status"        # the job changed state: awaiting approval, done
 ERROR      = "error"
 

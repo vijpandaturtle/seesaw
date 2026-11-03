@@ -7,7 +7,9 @@ params["pathway_params"] for the human gate to show. Lens's stage then runs
 the pathway on exactly those inputs before any of Lens's own experiments,
 which are labelled extras, so the same pathway on the same kind of inputs
 gives results comparable across models. A rerun (jobs.rerun) starts at Lens
-with those inputs already saved, so they're checked again against its model.
+with those inputs already saved, so they're checked again against its model,
+and replays the source job's extra experiments exactly as they ran (same
+tools, prompts and arguments) instead of having an LLM read the plan again.
 
     python -m orchestrator.src.worker <job_id>   one job, then exit
     python -m orchestrator.src.worker --poll     claim queued jobs forever
@@ -134,13 +136,25 @@ def run_lens_stage(job: Job) -> None:
         plan_text += _PATHWAY_DONE.format(name=pathway["pathway"], version=pathway["version"],
                                           verdict=pathway["verdict"])
 
-    bundle, bundle_path = run_lens(
-        plan_text,
-        thread_id=f"job-{job.id}-lens",
-        output_dir=jobs.job_dir(job.id),
-    )
+    replay = _replay_of(job) if params.get("rerun_of") else None
+    if replay is not None and not replay["experiments"]:
+        # The source ran no extras: nothing for Lens (or its LLM) to do.
+        bundle_path = jobs.job_dir(job.id) / "results_bundle.json"
+        bundle_path.parent.mkdir(parents=True, exist_ok=True)
+        bundle = {"research_question": replay["research_question"], "model_name": job.model,
+                  "results": [], "n_total": 0, "n_success": 0, "n_failed": 0}
+    else:
+        bundle, bundle_path = run_lens(
+            plan_text,
+            thread_id=f"job-{job.id}-lens",
+            output_dir=jobs.job_dir(job.id),
+            **({"replay": replay} if replay else {}),
+        )
+    if replay is not None:
+        bundle["replayed_from"] = params["rerun_of"]
     if pathway is not None:
         bundle = _with_pathway(bundle, pathway)
+    if pathway is not None or replay is not None:
         bundle_path.write_text(json.dumps(bundle, indent=2, default=str))
     jobs.update(job.id, bundle_path=str(bundle_path))
     print(f"   {bundle['n_success']}/{bundle['n_total']} experiments succeeded")
@@ -165,6 +179,39 @@ def run_quill_stage(job: Job) -> None:
                                     output_dir=jobs.job_dir(job.id))
     jobs.update(job.id, report_path=str(report_path))
     print(f"   assessment: {report.overall_assessment}")
+
+
+def _replay_of(job: Job) -> dict | None:
+    """The extra experiments a rerun's source job ran, to run again as they ran.
+
+    Read from the source's results bundle, with the rerun's model swapped in.
+    None when that bundle isn't here (the source never finished Lens, or ran
+    on another machine): Lens then reads the plan again, and says so.
+    """
+    from pathlib import Path
+
+    source_id = job.params_dict["rerun_of"]
+    source = jobs.get(source_id)
+    path = Path(source.bundle_path) if source and source.bundle_path else None
+    if path is None or not path.exists():
+        why = f"job {source_id} has no results bundle here; Lens reads the plan again instead"
+        print(f"   ↳ {why}")
+        events.emit(events.NOTE, "replay", status=events.FAILED, summary=why)
+        return None
+
+    bundle = json.loads(path.read_text())
+    experiments = [
+        {"name": r["name"], "tool": r["tool"], "model_name": job.model,
+         "prompts": r["prompts"], "tool_kwargs": r.get("tool_kwargs") or {}}
+        for r in bundle.get("results", []) if r.get("role") != "pathway"
+    ]
+    print(f"   replaying {len(experiments)} experiment(s) from job {source_id}")
+    events.emit(events.NOTE, "replay",
+                summary=f"replaying {len(experiments)} experiment(s) from job {source_id} "
+                        f"on {job.model}, as they ran",
+                data={"source": source_id, "experiments": experiments})
+    return {"research_question": bundle.get("research_question") or job.question,
+            "model_name": job.model, "experiments": experiments}
 
 
 def _run_pathway(job: Job, name: str, params: dict) -> dict:

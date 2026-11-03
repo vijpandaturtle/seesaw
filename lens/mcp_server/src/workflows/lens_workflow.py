@@ -1,11 +1,15 @@
 """LangGraph workflow for the Lens agent.
 
 Graph structure:
-    parse_plan → load_model → run_experiment → interpret_result → check_followup
-                                    ▲                                      │
-                                    └──────── more experiments? ───────────┘
-                                                                           │
-                                                                   collect_results → END
+    parse_plan  ─┐
+                 ├→ load_model → run_experiment → interpret_result → check_followup
+    replay_plan ─┘                    ▲                                      │
+                                      └──────── more experiments? ───────────┘
+                                                                             │
+                                                                     collect_results → END
+
+A run starts at replay_plan when it's given `replay` (experiments a job ran
+before, for a rerun), and at parse_plan otherwise.
 """
 
 from langgraph.checkpoint.memory import MemorySaver
@@ -18,6 +22,7 @@ from ..nodes import (
     interpret_result,
     load_model_node,
     parse_plan,
+    replay_plan,
     run_experiment,
 )
 
@@ -35,9 +40,14 @@ class LensState(TypedDict):
     results:           list[dict]
     bundle:            dict | None
     output_dir:        str       # bundle and plots go here; defaults to Lens's OUTPUTS_DIR
+    replay:            dict | None   # {research_question, model_name, experiments}: run these as-is
 
 
-# ── Router ────────────────────────────────────────────────────────────────────
+# ── Routers ───────────────────────────────────────────────────────────────────
+def route_start(state: LensState) -> str:
+    return "replay_plan" if state.get("replay") else "parse_plan"
+
+
 def route_after_followup(state: LensState) -> str:
     return "run_experiment" if state.get("experiment_queue") else "collect_results"
 
@@ -57,14 +67,18 @@ def build_lens_graph(checkpointer=None):
 
     workflow = StateGraph(LensState)
     workflow.add_node("parse_plan",       parse_plan)
+    workflow.add_node("replay_plan",      replay_plan)
     workflow.add_node("load_model",       load_model_node)
     workflow.add_node("run_experiment",   run_experiment)
     workflow.add_node("interpret_result", interpret_result)
     workflow.add_node("check_followup",   check_followup)
     workflow.add_node("collect_results",  collect_results)
 
-    workflow.set_entry_point("parse_plan")
+    workflow.set_conditional_entry_point(
+        route_start, {"parse_plan": "parse_plan", "replay_plan": "replay_plan"},
+    )
     workflow.add_edge("parse_plan",       "load_model")
+    workflow.add_edge("replay_plan",      "load_model")
     workflow.add_edge("load_model",       "run_experiment")
     workflow.add_edge("run_experiment",   "interpret_result")
     workflow.add_edge("interpret_result", "check_followup")
