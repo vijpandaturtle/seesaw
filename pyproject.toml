@@ -32,7 +32,8 @@ experiments = [
     "torch",
     "numpy",
     "matplotlib",
-    "transformer-lens",
+    # 4.0 removed HookedTransformer, which Lens and the pathways use.
+    "transformer-lens>=3.5,<4",
     "sae-lens",
 ]
 # The lever interp backend (SEESAW_INTERP_BACKEND=lever): vision-language

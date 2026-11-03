@@ -37,7 +37,10 @@ image = (
     .pip_install(
         "numpy",
         "matplotlib",
-        "transformer-lens",
+        # Pinned with the rest: TransformerLens 4.0 removed HookedTransformer,
+        # which Lens and the pathways are written against.
+        "transformer-lens==3.5.1",
+        "transformers==5.12.1",
         # feature_explain's SAE.
         "sae-lens==6.44.4",
     )
