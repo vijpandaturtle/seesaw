@@ -23,7 +23,6 @@ OUTPUTS_DIR.mkdir(parents=True, exist_ok=True)
 # ── Model ─────────────────────────────────────────────────────────────────────
 SCOUT_MODEL: str = "claude-opus-4-5"
 SCOUT_MAX_TOKENS: int = 8_000
-SCOUT_TEMPERATURE: float = 1.0
 
 # ── Scraping ──────────────────────────────────────────────────────────────────
 MAX_AGE_ONE_WEEK: int = 604_800_000   # milliseconds — Firecrawl cache TTL

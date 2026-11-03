@@ -4,7 +4,7 @@ import json
 
 from fastmcp import FastMCP
 
-from ..config import OUTPUTS_DIR, QUILL_MODEL, QUILL_TEMPERATURE
+from ..config import OUTPUTS_DIR, QUILL_MODEL
 
 
 def register_status_resource(mcp: FastMCP) -> None:
@@ -14,7 +14,6 @@ def register_status_resource(mcp: FastMCP) -> None:
         already been saved to disk (from nodes/save_critique.py)."""
         status = {
             "model": QUILL_MODEL,
-            "temperature": QUILL_TEMPERATURE,
             "outputs_dir": str(OUTPUTS_DIR),
             "saved_reports": sorted(p.name for p in OUTPUTS_DIR.glob("critique_*.md")),
         }

@@ -6,7 +6,6 @@ from ..config import (
     ANTHROPIC_API_KEY,
     GENERATE_FOLLOWUPS_SYSTEM,
     QUILL_MODEL,
-    QUILL_TEMPERATURE,
 )
 
 
@@ -22,7 +21,6 @@ def generate_followups(state: dict) -> dict:
 
     model = ChatAnthropic(
         model=QUILL_MODEL,
-        temperature=QUILL_TEMPERATURE,
         api_key=ANTHROPIC_API_KEY,
     )
     structured = model.with_structured_output(FollowUpsOutput)

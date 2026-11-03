@@ -7,7 +7,6 @@ from ..config import (
     ANTHROPIC_API_KEY,
     SCOUT_MODEL,
     SCOUT_MAX_TOKENS,
-    SCOUT_TEMPERATURE,
     SCOUT_SYSTEM_PROMPT,
 )
 from ..tools import SCOUT_TOOLS, make_save_research_plan
@@ -26,7 +25,6 @@ def build_agent(checkpointer=None, output_dir=None):
     model = ChatAnthropic(
         model=SCOUT_MODEL,
         api_key=ANTHROPIC_API_KEY,
-        temperature=SCOUT_TEMPERATURE,
         max_tokens=SCOUT_MAX_TOKENS,
     )
 

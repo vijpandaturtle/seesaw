@@ -36,7 +36,7 @@ from .commands import (
     print_resources,
     print_tools,
 )
-from .settings import ANTHROPIC_API_KEY, LENS_CLIENT_MODEL, LENS_CLIENT_TEMPERATURE
+from .settings import ANTHROPIC_API_KEY, LENS_CLIENT_MODEL
 from ...mcp_server.src.server import mcp as lens_server
 
 
@@ -55,7 +55,6 @@ async def main() -> None:
         llm      = ChatAnthropic(
             model=LENS_CLIENT_MODEL,
             api_key=ANTHROPIC_API_KEY,
-            temperature=LENS_CLIENT_TEMPERATURE,
         )
         agent = create_react_agent(model=llm, tools=lc_tools, checkpointer=MemorySaver())
         config = {"configurable": {"thread_id": "lens-mcp-client"}}

@@ -22,4 +22,3 @@ OUTPUTS_DIR.mkdir(parents=True, exist_ok=True)
 # ── Model ─────────────────────────────────────────────────────────────────────
 # Opus for deep analytical critique — Quill is the most reasoning-intensive agent
 QUILL_MODEL: str = "claude-opus-4-5"
-QUILL_TEMPERATURE: float = 0.2

@@ -4,7 +4,7 @@ import json
 
 from fastmcp import FastMCP
 
-from ..config import FIRECRAWL_API_KEY, OUTPUTS_DIR, SCOUT_MAX_TOKENS, SCOUT_MODEL, SCOUT_TEMPERATURE
+from ..config import FIRECRAWL_API_KEY, OUTPUTS_DIR, SCOUT_MAX_TOKENS, SCOUT_MODEL
 
 
 def register_status_resource(mcp: FastMCP) -> None:
@@ -19,7 +19,6 @@ def register_status_resource(mcp: FastMCP) -> None:
         status = {
             "model": SCOUT_MODEL,
             "max_tokens": SCOUT_MAX_TOKENS,
-            "temperature": SCOUT_TEMPERATURE,
             "outputs_dir": str(OUTPUTS_DIR),
             "firecrawl_configured": bool(FIRECRAWL_API_KEY),
             "saved_plans": sorted(p.name for p in OUTPUTS_DIR.glob("*.md")),
