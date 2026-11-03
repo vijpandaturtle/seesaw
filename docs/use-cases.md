@@ -60,8 +60,18 @@ seesaw jobs rerun <id> --follow
 
 Add `--model` (or pick another model next to the button) to run the same experiment on another model:
 that's how to compare models on identical prompts. The inputs are checked against the new model first,
-so an answer that's two tokens in its tokenizer is refused before anything runs. Lens's extra
-experiments are read from the plan by an LLM again, so only the pathway is guaranteed to repeat.
+so an answer that's two tokens in its tokenizer is refused before anything runs.
+
+Lens's extra experiments repeat too: a rerun replays the ones the source job ran, with the same tools,
+prompts and arguments, instead of having an LLM read the plan again, and adds no new follow-ups. What
+can differ is only what an LLM writes about the results: Lens's summaries and Quill's critique. On
+another model, an experiment that names something the model doesn't have (a layer past its last one,
+say) fails and is reported as failed. If the source job's results aren't on the machine running the
+rerun, Lens reads the plan again, and the Timeline shows that it did.
+
+There's no sampling setting to make the LLM parts repeat: the API no longer accepts `temperature`,
+and even `temperature` 0 never guaranteed identical output. Reproducibility comes from recording what
+was decided and replaying it.
 
 For fixed inputs with no job at all (the ★ checks below, or trying a pathway in a notebook), call the
 pathway directly: `seesaw.pathways.circuit_discovery.run(model, prompts, positive_tokens,

@@ -393,8 +393,9 @@ def rerun(job_id: str, model: str | None = None, auto_approve: bool = False) -> 
     inputs approved there, so Scout (and its LLM) never runs again: the same
     pathway version on the same model and inputs gives the same verdict. On
     another model, it's the same experiment on that model. Lens's extra
-    experiments come from the same plan, but an LLM reads them out of it, so
-    only the pathway is guaranteed to repeat.
+    experiments are replayed from the source job's results bundle as they
+    ran (same tools, prompts and arguments; no follow-ups added), so only
+    the LLM-written summaries and critique can differ.
 
     Args:
         job_id: A research job whose pathway inputs were approved (it got past

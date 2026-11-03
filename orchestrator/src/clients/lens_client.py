@@ -11,6 +11,7 @@ def run_lens(
     research_plan: str,
     thread_id: str = "lens-1",
     output_dir: Path = OUTPUTS_DIR,
+    replay: dict | None = None,
 ) -> tuple[dict, Path]:
     """Run the Lens workflow on a research plan.
 
@@ -22,6 +23,9 @@ def run_lens(
         research_plan: Full text of the Scout research plan.
         thread_id: LangGraph thread ID for checkpointing.
         output_dir: Where the bundle and plots go; a job passes its own folder.
+        replay: {"research_question", "model_name", "experiments"} to run
+            these experiments exactly as given instead of parsing the plan
+            (a rerun); no follow-ups are added.
 
     Returns:
         Tuple of (bundle dict, path to results_bundle.json).
@@ -35,7 +39,7 @@ def run_lens(
     print("🔬 Lens starting experiments...")
 
     final = graph.invoke(
-        {"research_plan": research_plan, "output_dir": str(output_dir)},
+        {"research_plan": research_plan, "output_dir": str(output_dir), "replay": replay},
         config=config,
     )
 
