@@ -37,8 +37,10 @@ image = (
         "torch",
         "numpy",
         "matplotlib",
-        "transformer-lens",
-        "sae-lens",          # feature_attribution / feature_clamping load SAEs
+        # TransformerLens 4.0 removed HookedTransformer, which the tools use.
+        "transformer-lens==3.5.1",
+        "transformers==5.12.1",
+        "sae-lens==6.44.4",  # feature_attribution / feature_clamping load SAEs
         # Pulled in by the import chain rather than by the tools themselves:
         # config/settings.py calls load_dotenv, models/schemas.py uses pydantic.
         "python-dotenv",
