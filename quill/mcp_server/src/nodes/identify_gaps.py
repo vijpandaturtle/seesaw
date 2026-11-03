@@ -7,7 +7,6 @@ from ..config import (
     ANTHROPIC_API_KEY,
     IDENTIFY_GAPS_SYSTEM,
     QUILL_MODEL,
-    QUILL_TEMPERATURE,
 )
 
 
@@ -22,7 +21,6 @@ def identify_gaps(state: dict) -> dict:
 
     model = ChatAnthropic(
         model=QUILL_MODEL,
-        temperature=QUILL_TEMPERATURE,
         api_key=ANTHROPIC_API_KEY,
     )
     structured = model.with_structured_output(GapsOutput)

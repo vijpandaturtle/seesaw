@@ -45,7 +45,10 @@ image = (
         "python-dotenv",
         "pydantic",
         "langchain-core",
-        "langchain-anthropic",
+        # Pinned: an unpinned rebuild pulled an SDK that moved to a new API
+        # version mid-flight. Bump deliberately, after reading its changes.
+        "anthropic==2.4.0",
+        "langchain-anthropic==1.7.9",
         "langchain-community",
         "langgraph",
         "langgraph-checkpoint-sqlite",
