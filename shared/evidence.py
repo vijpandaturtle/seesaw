@@ -126,6 +126,37 @@ TRUST: dict[Backend, dict[str, Trust]] = {
         "feature_clamping": Trust(controls=(
             Control("random_joint_change", "the same number of random active features"),
         )),
+        "answer_scores": Trust(caveat=(
+            "Shows how strongly the model gives the answer, not why.")),
+        "probe_transfer": Trust(controls=(
+            Control("shuffled_accuracy", "shuffled labels"),
+            Control("embedding_accuracy", "a probe on the embeddings alone"),
+            Control("text_baseline_accuracy", "a bag-of-words classifier with no model"),
+        ), min_prompts=4,
+            caveat="The held-out texts test transfer only as far as they differ from the training texts."),
+        "feature_lookup": Trust(thin_below=1, caveat=(
+            "Feature labels are written automatically by Neuronpedia and can be wrong.")),
+        "mlp_patching": Trust(caveat=f"{_PATCHING} {_ALONE}"),
+        "leace_erasure": Trust(controls=(
+            Control("random_fraction_removed", "random erasers of the same rank"),
+            Control("control_loss_after", "language-modelling loss with the erasers applied"),
+        ), caveat="LEACE removes what a linear readout could see; a nonlinear one might still see it."),
+        "causal_tracing": Trust(caveat=(
+            "Noised embeddings are unnatural input: recovery shows where clean information helps, "
+            "not the whole mechanism.")),
+        "rome_edits": Trust(caveat=(
+            "The key covariance comes from a short built-in corpus, so specificity is rougher than "
+            "published ROME numbers.")),
+        "patchscope": Trust(caveat=(
+            "The model is asked to repeat a patched state; it reads what that state encodes, not "
+            "what the original prompt used it for.")),
+        "kv_head_patching": Trust(caveat=f"{_PATCHING} {_ALONE}"),
+        "feature_steering": Trust(controls=(
+            Control("random_abs_slope", "random directions pushed the same way"),
+            Control("control_loss_after", "language-modelling loss with the strongest push"),
+        ), caveat="A large push can move the output by damaging the model; compare the loss."),
+        "model_diff": Trust(caveat=(
+            "Covers only these prompts: a change that shows up on other inputs won't appear here.")),
     },
     "lever": {
         "logit_lens": Trust(caveat=(
@@ -151,24 +182,6 @@ PATHWAY_STEPS: dict[str, tuple[Kind, Trust]] = {
     "bake_check": ("causal", Trust(caveat=(
         "Checks the edit folded into the weights matches the hook version; it doesn't test the "
         "direction itself."))),
-    "probe_transfer": ("descriptive", Trust(controls=(
-        Control("shuffled_accuracy", "shuffled labels"),
-        Control("embedding_accuracy", "a probe on the embeddings alone"),
-        Control("text_baseline_accuracy", "a bag-of-words classifier with no model"),
-    ), caveat="The held-out texts test transfer only as far as they differ from the training texts.")),
-    "leace_erasure": ("causal", Trust(controls=(
-        Control("random_fraction_removed", "random erasers of the same rank"),
-        Control("control_loss_after", "language-modelling loss with the erasers applied"),
-    ), caveat="LEACE removes what a linear readout could see; a nonlinear one might still see it.")),
-    "causal_tracing": ("causal", Trust(caveat=(
-        "Noised embeddings are unnatural input: recovery shows where clean information helps, "
-        "not the whole mechanism."))),
-    "rome_edits": ("causal", Trust(caveat=(
-        "The key covariance comes from a short built-in corpus, so specificity is rougher than "
-        "published ROME numbers."))),
-    "model_diff": ("causal", Trust(caveat=(
-        "Covers only these prompts: a change that shows up on other inputs won't appear here."))),
-    "mlp_patching": ("causal", Trust(caveat=_PATCHING)),
 }
 
 

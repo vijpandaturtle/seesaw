@@ -28,6 +28,8 @@ from functools import lru_cache
 from pathlib import Path
 from typing import NamedTuple
 
+from shared.lens_tools import DEFAULT_MODEL, MODELS
+
 
 class Pathway(NamedTuple):
     summary: str
@@ -90,8 +92,8 @@ PATHWAYS: dict[str, Pathway] = {
         text_inputs=("other_model",),
     ),
     "feature_explain": Pathway(
-        "which SAE features drive this output, and what are they? sweeps GPT-2 small SAEs at several "
-        "layers (gpt2 only)",
+        "which SAE features drive this output, and what are they? sweeps published residual SAEs at "
+        "several depths (gemma-2-2b, or Qwen2.5-7B-Instruct; no published SAEs for other models)",
         required=("prompts", "positive_tokens", "negative_tokens"),
         version="2",
     ),
@@ -134,18 +136,79 @@ INPUTS: dict[str, str] = {
                    "name with the same tokenizer (one string, not a list)",
 }
 
-# feature_explain's SAEs: GPT-2 small residual SAEs at four layers, swept.
-# Layer 8 is the one the known-answer test uses.
-SAE_RELEASE = "gpt2-small-res-jb"
-SAE_IDS = tuple(f"blocks.{layer}.hook_resid_pre" for layer in (4, 6, 8, 10))
-SAE_MODELS = ("gpt2", "gpt2-small")
+class FeatureSAEs(NamedTuple):
+    """The published residual SAEs feature_explain reads for one model."""
+    release: str                 # SAELens release (the feature tools pick it by model and layer)
+    layers: tuple[int, ...]      # layers it has an SAE for
+
+
+# feature_explain needs published SAEs, and only these models have them (with
+# Neuronpedia labels). Llama-3.2 and the other Qwen2.5 sizes have none, so the
+# pathway refuses them rather than run on SAEs nobody has checked.
+FEATURE_SAES: dict[str, FeatureSAEs] = {
+    "gemma-2-2b": FeatureSAEs("gemma-scope-2b-pt-res-canonical", tuple(range(26))),
+    "Qwen2.5-7B-Instruct": FeatureSAEs("qwen2.5-7b-instruct-andyrdt", (3, 7, 11, 15, 19, 23, 27)),
+}
+# The depths feature_explain sweeps, as fractions of the model's layers: past
+# token-level features, before the final layers that mostly map to vocabulary.
+SAE_DEPTHS = (0.3, 0.45, 0.6, 0.75)
+
+
+def _short(model: str) -> str:
+    """'google/gemma-2-2b' → 'gemma-2-2b': the name TransformerLens records."""
+    return model.split("/", 1)[-1]
+
+
+def feature_models() -> list[str]:
+    return list(FEATURE_SAES)
+
+
+def has_saes(model: str) -> bool:
+    return _short(model) in FEATURE_SAES
+
+
+def sae_layers(model: str) -> list[int]:
+    """The layers feature_explain sweeps on `model`: each depth's nearest layer with an SAE."""
+    saes = FEATURE_SAES[_short(model)]
+    n = max(saes.layers) + 1
+    return sorted({min(saes.layers, key=lambda l: abs(l - d * n)) for d in SAE_DEPTHS})
+
+
+def as_models(models: str | list[str] | None) -> list[str]:
+    """A job's models as a list: one name, a list, or none (the default model)."""
+    if not models:
+        return [DEFAULT_MODEL]
+    return [models] if isinstance(models, str) else list(models)
+
+
+def models_brief(models: str | list[str]) -> str:
+    """Tell Scout the models the user chose: every experiment runs on one of them."""
+    models = as_models(models)
+    notes = [f"- `{m}`: {MODELS[m]}" if m in MODELS else f"- `{m}`" for m in models]
+    return "\n".join([
+        "## Models",
+        "",
+        "The user chose the models this job runs on. Give every experiment's **Model** as one of",
+        "them, written exactly so; no other model will run. Cover each of them where the question",
+        "allows, and keep in mind what each supports:",
+        *notes,
+    ])
+
+
+def _on(models: list[str]) -> str:
+    return models[0] if len(models) == 1 else ", ".join(models[:-1]) + " and " + models[-1]
+
+
+def _no_saes(model: str) -> str:
+    return (f"feature_explain needs published SAEs, which only {feature_models()} have; "
+            f"not {model!r}")
 
 
 def names() -> list[str]:
     return list(PATHWAYS)
 
 
-def validate(name: str, params: dict, model: str = "gpt2") -> list[str]:
+def validate(name: str, params: dict, model: str = DEFAULT_MODEL) -> list[str]:
     """Everything wrong with these inputs, or [] when the job can run."""
     pathway = PATHWAYS.get(name)
     if pathway is None:
@@ -176,12 +239,12 @@ def validate(name: str, params: dict, model: str = "gpt2") -> list[str]:
             if _is_str_list(value) and value and len(value) != len(prompts):
                 errors.append(f"{key} has {len(value)} entries but prompts has {len(prompts)}")
 
-    if name == "feature_explain" and model not in SAE_MODELS:
-        errors.append(f"feature_explain only runs on gpt2 (its SAE is {SAE_RELEASE}), not {model!r}")
+    if name == "feature_explain" and not has_saes(model):
+        errors.append(_no_saes(model))
     return errors
 
 
-def check_inputs(name: str, params: dict, model: str = "gpt2") -> list[str]:
+def check_inputs(name: str, params: dict, model: str = DEFAULT_MODEL) -> list[str]:
     """Everything stopping these inputs running on this model, tokenizer included."""
     return validate(name, params, model) or token_errors(params, model)
 
@@ -198,38 +261,50 @@ def _describe(key: str, kind: str) -> str:
     return f"- `{key}` ({kind}): {INPUTS[key]}."
 
 
-def _input_rules(model: str) -> list[str]:
+def _input_rules(models: list[str]) -> list[str]:
+    model = (f"{models[0]}'s tokenizer" if len(models) == 1 else
+             f"every chosen model's tokenizer ({_on(models)}): the inputs run on each")
     return [
         "Rules for the inputs:",
         "- Every value is a list of strings, except a pathway's single-string inputs (marked",
         "  below). \"One per prompt\" means exactly as many entries as `prompts`, in the same order.",
         "- Answer tokens need a leading space (\" Mary\", not \"Mary\") and must each be a",
-        f"  single token in {model}'s tokenizer; prefer short, common words.",
+        f"  single token in {model}; prefer short, common words.",
         "- Each prompt should end right before the answer, so the answer is the next token.",
         "- Use at least 8 prompts where the task allows it; vary names and wording.",
     ]
 
 
-def choice_brief(model: str = "gpt2") -> str:
+def _fixed_other_model(other_model: str | None) -> list[str]:
+    if not other_model:
+        return []
+    return [f"- model_diffing compares with `{other_model}`, which the user chose: leave `other_model` "
+            "out of its params (it is filled in), or write exactly that."]
+
+
+def choice_brief(models: str | list[str] = DEFAULT_MODEL, other_model: str | None = None) -> str:
     """Tell Scout it may choose one of the pathways for this job, or none.
 
     Scout writes its choice as one fenced json block: {"pathway": name or
     null, "why": ..., "params": {...}}, which `extract_choice` reads back.
     """
+    models = as_models(models)
     lines = [
         "## Choose a pathway (or none)",
         "",
         "A pathway is a hand-coded investigation with a fixed verdict, checked against known",
-        f"results. If one of these answers the question on {model}, choose it: it runs first,",
+        f"results. If one of these answers the question on {_on(models)}, choose it: it runs first,",
         "exactly on the inputs you give, and is the job's primary evidence. You choose its inputs",
         "and say why it fits. If none answers the question, choose none and plan the experiments",
-        "yourself; don't bend the question to fit a pathway.",
+        "yourself; don't bend the question to fit a pathway."
+        + (" It runs once on each model (model_diffing runs once, comparing the first with the"
+           " other model)." if len(models) > 1 else ""),
         "",
     ]
     for name, pathway in PATHWAYS.items():
         if name == "attribute_audit":
             continue                  # an older name for concept_direction
-        if name == "feature_explain" and model not in SAE_MODELS:
+        if name == "feature_explain" and not all(has_saes(m) for m in models):
             continue
         needs = ", ".join(f"`{k}`" for k in pathway.required)
         needs += "".join(f", `{k}` (one string)" for k in pathway.text_inputs)
@@ -240,7 +315,7 @@ def choice_brief(model: str = "gpt2") -> str:
     used = dict.fromkeys(k for pw in PATHWAYS.values()
                          for k in (*pw.required, *pw.text_inputs, *pw.optional))
     lines += ["", "What the inputs mean:", *(_describe(k, "input") for k in used), "",
-              *_input_rules(model), "",
+              *_input_rules(models), *_fixed_other_model(other_model), "",
               "Put your choice in the plan you save, as exactly one fenced ```json block:",
               "",
               "```json",
@@ -255,7 +330,7 @@ def choice_brief(model: str = "gpt2") -> str:
     return "\n".join(lines)
 
 
-def scout_brief(name: str, model: str = "gpt2") -> str:
+def scout_brief(name: str, models: str | list[str] = DEFAULT_MODEL, other_model: str | None = None) -> str:
     """Tell Scout which pathway will run and what it has to choose.
 
     The pathway is fixed: Scout's job is only to pick its inputs, written as
@@ -263,32 +338,40 @@ def scout_brief(name: str, model: str = "gpt2") -> str:
     """
     pathway = PATHWAYS[name]
     describe = _describe
+    models = as_models(models)
+    each = ("" if len(models) == 1 or name == "model_diffing" else
+            " It runs once on each of them, on the same inputs.")
+    if name == "model_diffing" and other_model:
+        each = f" It compares {models[0]} with {other_model}, the model the user chose."
 
     lines = [
         f"## Required pathway: `{name}` (version {pathway.version})",
         "",
-        f"This job must run the hand-coded `{name}` pathway on {model}: {pathway.summary}.",
+        f"This job must run the hand-coded `{name}` pathway on {_on(models)}: {pathway.summary}.{each}",
         "Lens runs it first, exactly as you specify it, so the result is comparable across",
         "models. You do not design its steps; you choose its inputs. You may still propose",
         "extra experiments in the plan; they will be run after the pathway and labelled extras.",
         "",
         "Inputs:",
-        *(describe(k, "required") for k in (*pathway.required, *pathway.text_inputs)),
+        *(describe(k, "required") for k in (*pathway.required, *pathway.text_inputs)
+          if not (k == "other_model" and other_model)),
         *(describe(k, "optional") for k in pathway.optional),
         "",
-        *_input_rules(model),
+        *_input_rules(models),
+        *_fixed_other_model(other_model),
     ]
     if pathway.text_inputs:
         lines.append("- " + ", ".join(f"`{k}`" for k in pathway.text_inputs) + " is a single string, not a list.")
     if name == "feature_explain":
-        lines.append(f"- This pathway only runs on gpt2 (its SAE is {SAE_RELEASE}).")
+        lines.append(f"- This pathway only runs on {feature_models()} (the models with published SAEs).")
     lines += [
         "",
         "Put the inputs in the plan you save, as exactly one fenced ```json block of the form:",
         "",
         "```json",
         json.dumps({"pathway": name, "params": {**{k: ["..."] for k in pathway.required},
-                                                 **{k: "..." for k in pathway.text_inputs}}}),
+                                                 **{k: "..." for k in pathway.text_inputs
+                                                    if not (k == "other_model" and other_model)}}}),
         "```",
         "",
         "The block is checked before the job continues; if it is invalid you will be told why",
@@ -313,7 +396,69 @@ def _pathway_blocks(plan_text: str) -> tuple[list[dict], list[str]]:
     return blocks, []
 
 
-def extract_choice(plan_text: str, model: str = "gpt2") -> tuple[str | None, dict | None, str, list[str]]:
+def _with_other_model(name: str, params: dict, other_model: str | None) -> tuple[dict, list[str]]:
+    """model_diffing's inputs with the user's other_model filled in; Scout can't change it."""
+    if name != "model_diffing" or not other_model:
+        return params, []
+    named = params.get("other_model")
+    if named not in (None, "", other_model):
+        return params, [f"other_model is {other_model!r}, which the user chose; don't change it "
+                        f"(the block says {named!r})"]
+    return {**params, "other_model": other_model}, []
+
+
+def check_models(name: str, params: dict, models: str | list[str]) -> list[str]:
+    """check_inputs on every model the pathway runs on, each problem naming its model.
+
+    model_diffing runs once, on the first model (compared with other_model,
+    which must share its tokenizer).
+    """
+    models = as_models(models)
+    runs_on = models[:1] if name == "model_diffing" else models
+    errors = []
+    for model in runs_on:
+        problems = check_inputs(name, params, model)
+        errors += [p if len(runs_on) == 1 else f"{model}: {p}" for p in problems]
+    if name == "model_diffing" and isinstance(params.get("other_model"), str):
+        errors += tokenizer_mismatch(runs_on[0], params["other_model"])
+    return list(dict.fromkeys(errors))
+
+
+def tokenizer_mismatch(model: str, other_model: str) -> list[str]:
+    """[] when the two models share a tokenizer (or it can't be checked offline), else why not."""
+    a, b = _tokenizer(model), _tokenizer(other_model)
+    if a is None or b is None:
+        return []
+    probe = "The Eiffel Tower is in Paris. When Mary and John went to the store, John gave"
+    if (getattr(a, "vocab_size", None) != getattr(b, "vocab_size", None)
+            or a.encode(probe, add_special_tokens=False) != b.encode(probe, add_special_tokens=False)):
+        return [f"model_diffing compares models with the same tokenizer; {other_model} doesn't share "
+                f"{model}'s"]
+    return []
+
+
+_MODEL_LINE = re.compile(r"^\s*[-*]\s*\*\*Model\*\*\s*:\s*(.+?)\s*$", re.MULTILINE)
+
+
+def _canonical(name: str) -> str:
+    """'Qwen2.5-1.5B' or '`Qwen/Qwen2.5-1.5B`' → 'Qwen/Qwen2.5-1.5B' when it's a model Lens runs."""
+    name = name.strip("`* ").split(" (")[0].strip()
+    return next((m for m in MODELS if name in (m, _short(m))), name)
+
+
+def plan_model_errors(plan_text: str, models: str | list[str]) -> list[str]:
+    """Experiments in the plan ("- **Model**: ..." lines) on a model the user didn't choose."""
+    allowed = {_canonical(m) for m in as_models(models)}
+    stray = list(dict.fromkeys(m for m in (_canonical(x) for x in _MODEL_LINE.findall(plan_text))
+                               if m not in allowed))
+    if not stray:
+        return []
+    return [f"the plan runs experiments on {stray}, but this job's models are {sorted(allowed)}: "
+            "use only those"]
+
+
+def extract_choice(plan_text: str, models: str | list[str] = DEFAULT_MODEL,
+                   other_model: str | None = None) -> tuple[str | None, dict | None, str, list[str]]:
     """Read the pathway Scout chose (or declined) under AUTO, with its inputs, and check them.
 
     Returns:
@@ -336,11 +481,13 @@ def extract_choice(plan_text: str, model: str = "gpt2") -> tuple[str | None, dic
     if name not in PATHWAYS or name == "attribute_audit":
         choices = [n for n in names() if n != "attribute_audit"]
         return None, None, "", [f"unknown pathway {name!r}; choose one of {choices}, or null"]
-    errors = check_inputs(name, block.get("params") or {}, model)
-    return (None, None, "", errors) if errors else (name, block["params"], why, [])
+    params, errors = _with_other_model(name, block.get("params") or {}, other_model)
+    errors = errors or check_models(name, params, models)
+    return (None, None, "", errors) if errors else (name, params, why, [])
 
 
-def extract_inputs(name: str, plan_text: str, model: str = "gpt2") -> tuple[dict | None, list[str]]:
+def extract_inputs(name: str, plan_text: str, models: str | list[str] = DEFAULT_MODEL,
+                   other_model: str | None = None) -> tuple[dict | None, list[str]]:
     """Read the pathway inputs Scout wrote into its plan, and check them.
 
     Returns:
@@ -362,8 +509,8 @@ def extract_inputs(name: str, plan_text: str, model: str = "gpt2") -> tuple[dict
     block = blocks[0]
     if block.get("pathway") != name:
         return None, [f"the block names pathway {block.get('pathway')!r}, but this job runs {name!r}"]
-    params = block["params"]
-    errors = check_inputs(name, params, model)
+    params, errors = _with_other_model(name, block["params"], other_model)
+    errors = errors or check_models(name, params, models)
     return (None, errors) if errors else (params, [])
 
 
@@ -421,26 +568,24 @@ def _tokenizer(model: str):
 
 
 def run_from_params(name: str, model_name: str, params: dict, output_dir: Path):
-    """Load the model (and SAE) and run the pathway. Imports torch."""
+    """Run the pathway by model name. Imports torch.
+
+    Every step goes through Lens's tool registry by model name (see
+    seesaw.pathways.tools): with SEESAW_LENS_BACKEND=modal each step runs on
+    the GPU app, as Lens's experiments do; otherwise in this process on
+    Lens's cached copy of the model.
+    """
     problems = validate(name, params, model_name)
     if problems:
         raise ValueError("; ".join(problems))
 
     import importlib
 
-    from transformer_lens import HookedTransformer
-
     module = importlib.import_module(f"seesaw.pathways.{name}")
-    model = HookedTransformer.from_pretrained(model_name)
     kwargs = {k: v for k, v in params.items() if v}
     if name == "feature_explain":
-        from seesaw.interp.feature_extraction.sae import load_sae
-
-        saes = [load_sae(SAE_RELEASE, sae_id) for sae_id in SAE_IDS]
-        return module.run(model, saes, output_dir=output_dir, **kwargs)
-    if name == "model_diffing":
-        kwargs["other_model"] = HookedTransformer.from_pretrained(kwargs["other_model"])
-    return module.run(model, output_dir=output_dir, **kwargs)
+        return module.run(model_name, sae_layers(model_name), output_dir=output_dir, **kwargs)
+    return module.run(model_name, output_dir=output_dir, **kwargs)
 
 
 def _is_str_list(value) -> bool:

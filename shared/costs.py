@@ -90,8 +90,21 @@ def _model_key(model: str) -> str:
     return re.sub(r"-\d{8}$", "", name)
 
 
-def _gpu_rate() -> float:
-    return GPU_PER_SECOND[LENS_GPU]
+def gpu_for(model: str | None) -> str:
+    """The GPU Lens runs `model` on (shared/gpus.py), or LENS_GPU when there's no model to go by."""
+    if not model:
+        return LENS_GPU
+    from shared.gpus import gpu_for as route
+
+    return route(model)
+
+
+def _gpu_rate(gpu: str) -> float:
+    return GPU_PER_SECOND.get(gpu, GPU_PER_SECOND[LENS_GPU])
+
+
+def _gpu_usd(by_gpu: dict[str, float]) -> float:
+    return sum(seconds * _gpu_rate(gpu) for gpu, seconds in by_gpu.items())
 
 
 def _runner_rate() -> float:
@@ -117,8 +130,13 @@ def _pathway_on_gpu() -> bool:
 def stage_cost(events: list[dict], stage: str) -> dict:
     """What one stage cost, from its events (shared.db.events.list_events, with data)."""
     llm_usd, unpriced, tokens_in, tokens_out = 0.0, set(), 0, 0
-    experiments, gpu_seconds, seconds = 0, 0.0, 0.0
+    experiments, seconds = 0, 0.0
     pathway, pathway_seconds = None, 0.0
+    # GPU seconds per GPU type: a job's models can need different GPUs.
+    by_gpu: dict[str, float] = {}
+    # A step's model is its pathway run's (one run per model).
+    pathway_model = {e["id"]: (e.get("data") or {}).get("model") for e in events
+                     if e["kind"] == "pathway" and "id" in e}
     for e in events:
         if e.get("stage") != stage:
             continue
@@ -134,25 +152,29 @@ def stage_cost(events: list[dict], stage: str) -> dict:
                 llm_usd += usd
         elif e["kind"] == "experiment" and _on_gpu():
             experiments += 1
-            gpu_seconds += (e.get("duration_ms") or 0) / 1000
+            gpu = gpu_for(data.get("model"))
+            by_gpu[gpu] = by_gpu.get(gpu, 0.0) + (e.get("duration_ms") or 0) / 1000
         elif e["kind"] == "step" and _pathway_on_gpu():
-            gpu_seconds += (e.get("duration_ms") or 0) / 1000
+            gpu = gpu_for(pathway_model.get(e.get("parent_id")))
+            by_gpu[gpu] = by_gpu.get(gpu, 0.0) + (e.get("duration_ms") or 0) / 1000
         elif e["kind"] == "stage":
             seconds += (e.get("duration_ms") or 0) / 1000
         if e["kind"] == "pathway":
             pathway, pathway_seconds = e["name"], pathway_seconds + (e.get("duration_ms") or 0) / 1000
-    if gpu_seconds:
-        # The container was loaded for these calls and stayed warm after them.
-        gpu_seconds += LENS_COLD_START_SECONDS + LENS_IDLE_SECONDS
-    gpu_usd = gpu_seconds * _gpu_rate()
+    # Each GPU's container was loaded for these calls and stayed warm after them.
+    fixed = len(by_gpu) * (LENS_COLD_START_SECONDS + LENS_IDLE_SECONDS)
+    for gpu in by_gpu:
+        by_gpu[gpu] += LENS_COLD_START_SECONDS + LENS_IDLE_SECONDS
+    gpu_seconds = sum(by_gpu.values())
+    gpu_usd = _gpu_usd(by_gpu)
     runner_usd = seconds * _runner_rate()
     return {
         "stage": stage,
         "llm_usd": round(llm_usd, 4), "tokens_in": tokens_in, "tokens_out": tokens_out,
         "unpriced_models": sorted(unpriced),
         "experiments": experiments, "pathway": pathway, "pathway_seconds": round(pathway_seconds, 1),
-        "gpu": LENS_GPU if gpu_seconds else None,
-        "gpu_seconds": round(gpu_seconds, 1), "gpu_usd": round(gpu_usd, 4),
+        "gpu": ", ".join(sorted(by_gpu)) or None,
+        "gpu_seconds": round(gpu_seconds, 1), "gpu_fixed_seconds": fixed, "gpu_usd": round(gpu_usd, 4),
         "seconds": round(seconds, 1), "runner_usd": round(runner_usd, 4),
         "total_usd": round(llm_usd + gpu_usd + runner_usd, 4),
     }
@@ -186,7 +208,7 @@ def planned_experiments(plan_text: str) -> int | None:
 
 
 def estimate(stage: str, history: list[dict], *, plan_text: str | None = None,
-             pathway: str | None = None) -> dict:
+             pathway: str | None = None, models: list[str] | None = None) -> dict:
     """What `stage` will likely cost.
 
     Args:
@@ -195,6 +217,8 @@ def estimate(stage: str, history: list[dict], *, plan_text: str | None = None,
             ones for `stage` are used.
         plan_text: Scout's plan, for the lens stage: how many experiments it names.
         pathway: The pathway the lens stage runs first, if any.
+        models: The models the job runs on. Each one runs the plan (and the
+            pathway) on its own GPU (shared/gpus.py).
 
     Returns:
         {stage, llm_usd, gpu_seconds, gpu_usd, runner_usd, total_usd, basis}:
@@ -211,10 +235,12 @@ def estimate(stage: str, history: list[dict], *, plan_text: str | None = None,
         llm_usd, seconds = default["llm_usd"], default["seconds"]
         basis.append(f"no past {stage} stage has a cost record yet; default figures from early jobs")
 
-    gpu_seconds = 0.0
+    by_gpu: dict[str, float] = {}
     if stage == "lens" and _on_gpu():
+        models = models or [None]
         with_exps = [h for h in past if h.get("experiments")]
-        per_exp = (_median([(h["gpu_seconds"] - LENS_COLD_START_SECONDS - LENS_IDLE_SECONDS)
+        per_exp = (_median([(h["gpu_seconds"] - h.get("gpu_fixed_seconds",
+                                                      LENS_COLD_START_SECONDS + LENS_IDLE_SECONDS))
                             / h["experiments"] for h in with_exps])
                    if with_exps else default["experiment_seconds"])
         per_exp = max(per_exp, 0.5)
@@ -226,23 +252,30 @@ def estimate(stage: str, history: list[dict], *, plan_text: str | None = None,
             # Lens's LLM work grows with the experiments it interprets.
             past_n = _median([h["experiments"] for h in with_exps]) if with_exps else default["experiments"]
             llm_usd *= n / max(past_n, 1)
-        gpu_seconds = n * per_exp
+        if len(models) > 1:
+            basis.append(f"each of the {len(models)} models runs them")
+            llm_usd *= len(models)
+        pw = 0.0
         if pathway and _pathway_on_gpu():
             past_pw = [h["pathway_seconds"] for h in past if h.get("pathway") == pathway
                        and h.get("pathway_seconds")]
             pw = _median(past_pw) if past_pw else 120.0
-            gpu_seconds += pw
-            basis.append(f"pathway {pathway}: ~{pw:.0f} s"
+            basis.append(f"pathway {pathway}: ~{pw:.0f} s per model"
                          + (" (past runs)" if past_pw else " (default)"))
-        gpu_seconds += LENS_COLD_START_SECONDS + LENS_IDLE_SECONDS
+        for model in models:
+            gpu = gpu_for(model)
+            by_gpu[gpu] = by_gpu.get(gpu, 0.0) + n * per_exp + pw
+        for gpu in by_gpu:
+            by_gpu[gpu] += LENS_COLD_START_SECONDS + LENS_IDLE_SECONDS
         basis.append(f"GPU includes ~{LENS_COLD_START_SECONDS} s to load and "
-                     f"{LENS_IDLE_SECONDS // 60} min warm after the last experiment")
-    gpu_usd = gpu_seconds * _gpu_rate()
+                     f"{LENS_IDLE_SECONDS // 60} min warm after the last experiment, per GPU type")
+    gpu_seconds = sum(by_gpu.values())
+    gpu_usd = _gpu_usd(by_gpu)
     runner_usd = seconds * _runner_rate()
     return {
         "stage": stage,
         "llm_usd": round(llm_usd, 4),
-        "gpu": LENS_GPU if gpu_seconds else None,
+        "gpu": ", ".join(sorted(by_gpu)) or None,
         "gpu_seconds": round(gpu_seconds, 1), "gpu_usd": round(gpu_usd, 4),
         "runner_usd": round(runner_usd, 4),
         "total_usd": round(llm_usd + gpu_usd + runner_usd, 4),

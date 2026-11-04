@@ -1,6 +1,7 @@
 """Lens experiment execution on Modal.
 
     modal deploy lens/modal_app.py
+    SEESAW_MODAL_APP=seesaw-lens-dev modal deploy lens/modal_app.py   # a separate copy to test on
 
 Only the experiment tools run here — the forward passes. Lens's graph
 (plan parsing, result interpretation, follow-up decisions) stays on the machine
@@ -22,12 +23,22 @@ from __future__ import annotations
 
 import modal
 
-APP_NAME = "seesaw-lens"
+import os
 
-# gpt2-scale work is comfortable on an A10G. Larger models want more memory for
-# TransformerLens activation caching than for the weights themselves — see
-# MAX_SWEEP_ROWS in seesaw/interp/_helpers.py for the knob that bounds it.
+# Deploying under another name gives a copy to test on; the caller picks it with
+# the same variable (lens/mcp_server/src/app/remote.py).
+APP_NAME = os.environ.get("SEESAW_MODAL_APP") or "seesaw-lens"
+
+# The default GPU. Callers override it per call with Cls.with_options(gpu=...)
+# by model size (config.settings.gpu_for): an A10G holds float32 models up to
+# about 4B parameters, an A100-80GB the 7Bs. Larger models want more memory
+# for TransformerLens activation caching than for the weights themselves —
+# see MAX_SWEEP_ROWS in seesaw/interp/_helpers.py for the knob that bounds it.
 GPU = "A10G"
+
+# Gemma and Llama are gated on Hugging Face: the token comes from this Modal
+# secret (holding HF_TOKEN). Set SEESAW_HF_SECRET= (empty) to deploy without it.
+HF_SECRET = os.environ.get("SEESAW_HF_SECRET", "huggingface")
 
 CACHE_DIR = "/cache"
 
@@ -46,10 +57,13 @@ image = (
         "python-dotenv",
         "pydantic",
     )
-    .env({"HF_HOME": CACHE_DIR, "MPLCONFIGDIR": "/tmp/mpl"})
+    # The deploy-time settings, so the container defines the same app and
+    # secret the deploy did (Modal re-imports this file inside it).
+    .env({"HF_HOME": CACHE_DIR, "MPLCONFIGDIR": "/tmp/mpl",
+          "SEESAW_MODAL_APP": APP_NAME, "SEESAW_HF_SECRET": HF_SECRET})
     # The tools and their helpers, without the agent/LLM layer. Lens's tools
     # are thin wrappers over seesaw.interp, so the library has to ship too.
-    .add_local_python_source("lens", "seesaw")
+    .add_local_python_source("lens", "seesaw", "shared")
 )
 
 volume = modal.Volume.from_name("seesaw-hf-cache", create_if_missing=True)
@@ -61,6 +75,7 @@ app = modal.App(APP_NAME)
     image=image,
     gpu=GPU,
     volumes={CACHE_DIR: volume},
+    secrets=[modal.Secret.from_name(HF_SECRET)] if HF_SECRET else [],
     # One job runs several experiments back to back; keeping the container warm
     # between them avoids reloading weights each time.
     scaledown_window=600,
@@ -78,22 +93,11 @@ class LensRunner:
     def _model(self, model_name: str):
         from transformer_lens import HookedTransformer
 
-        from lens.mcp_server.src.config.settings import (
-            TL_CENTER_UNEMBED,
-            TL_CENTER_WRITING_WEIGHTS,
-            TL_FOLD_LN,
-            TL_REFACTOR_FACTORED_ATTN,
-        )
+        from lens.mcp_server.src.config.settings import tl_load_kwargs
 
         if model_name not in self._models:
             print(f"loading {model_name}")
-            model = HookedTransformer.from_pretrained(
-                model_name,
-                center_writing_weights=TL_CENTER_WRITING_WEIGHTS,
-                center_unembed=TL_CENTER_UNEMBED,
-                fold_ln=TL_FOLD_LN,
-                refactor_factored_attn_matrices=TL_REFACTOR_FACTORED_ATTN,
-            )
+            model = HookedTransformer.from_pretrained(model_name, **tl_load_kwargs(model_name))
             model.eval()
             self._models[model_name] = model
             volume.commit()          # persist anything newly downloaded

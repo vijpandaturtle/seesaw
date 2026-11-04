@@ -47,6 +47,8 @@ import uuid
 from dataclasses import dataclass
 from pathlib import Path
 
+from shared.lens_tools import DEFAULT_MODEL
+
 REPO_ROOT   = Path(__file__).resolve().parents[2]
 OUTPUTS_DIR = REPO_ROOT / "outputs"
 LOGS_DIR    = OUTPUTS_DIR / "job_logs"
@@ -145,6 +147,14 @@ class Job:
     @property
     def params_dict(self) -> dict:
         return json.loads(self.params) if self.params else {}
+
+    @property
+    def models(self) -> list[str]:
+        """The models the user chose, in order: params["models"], or [model] for older rows.
+
+        `model` is the first of them, kept for readers that know only one.
+        """
+        return list(self.params_dict.get("models") or [self.model])
 
     @property
     def cost_dict(self) -> dict:
@@ -360,46 +370,60 @@ def connect():
 
 
 # ── CRUD ─────────────────────────────────────────────────────────────────────
-def create(question: str, model: str = "gpt2", auto_approve: bool = False,
+def create(question: str, model: str | list[str] = DEFAULT_MODEL, auto_approve: bool = False,
            params: dict | None = None) -> Job:
     """Insert a new job, queued at Scout.
 
     Args:
         question: The mech interp question to investigate.
-        model: TransformerLens model Lens (and the pathway) should target.
+        model: The model, or models (in order), the user chose: Lens runs its
+            experiments on them and the pathway runs once on each. The first
+            is stored as the job's `model`, the list as params["models"].
         auto_approve: Run all three stages without stopping at the
             human gates between them.
         params: {"pathway": name} to make one of seesaw.pathways part of the
             job (Scout chooses its inputs), or {"pathway": "auto"} to have
             Scout choose the pathway too, or none. {"search": True} gives
             Scout its literature search tools; it plans without them otherwise.
+            {"other_model": name} is what model_diffing compares the first
+            model with, when the user chose it.
 
     Returns:
         The created Job.
 
     Raises:
-        ValueError: params other than a pathway and search, or an unknown pathway.
+        ValueError: unknown params, an unknown pathway, or models the pathway
+            can't run on.
     """
-    if params:
-        from seesaw.pathways import catalog
+    from seesaw.pathways import catalog
 
-        if not set(params) <= {"pathway", "search"}:
-            raise ValueError("a research job's params are only {\"pathway\": name or \"auto\", "
-                             "\"search\": bool}; Scout chooses the pathway's inputs")
-        name = params.get("pathway")
-        if name is not None and name != catalog.AUTO and name not in catalog.names():
-            raise ValueError(f"unknown pathway {name!r}; expected one of "
-                             f"{[catalog.AUTO, *catalog.names()]}")
-        if name == "feature_explain" and model not in catalog.SAE_MODELS:
-            raise ValueError(f"feature_explain only runs on gpt2, not {model!r}")
-        if "search" in params and not isinstance(params["search"], bool):
-            raise ValueError("search must be true or false")
-        params = {k: v for k, v in params.items() if v is not None}
+    models = catalog.as_models(model)
+    params = dict(params or {})
+    if not set(params) <= {"pathway", "search", "other_model"}:
+        raise ValueError("a research job's params are only {\"pathway\": name or \"auto\", "
+                         "\"search\": bool, \"other_model\": name}; Scout chooses the pathway's inputs")
+    name = params.get("pathway")
+    if name is not None and name != catalog.AUTO and name not in catalog.names():
+        raise ValueError(f"unknown pathway {name!r}; expected one of "
+                         f"{[catalog.AUTO, *catalog.names()]}")
+    if name == "feature_explain":
+        missing = [m for m in models if not catalog.has_saes(m)]
+        if missing:
+            raise ValueError(catalog._no_saes(missing[0]))
+    if params.get("other_model"):
+        if name not in ("model_diffing", catalog.AUTO):
+            raise ValueError("other_model is only for model_diffing")
+        mismatch = catalog.tokenizer_mismatch(models[0], params["other_model"])
+        if mismatch:
+            raise ValueError(mismatch[0])
+    if "search" in params and not isinstance(params["search"], bool):
+        raise ValueError("search must be true or false")
+    params = {k: v for k, v in params.items() if v is not None}
+    params["models"] = models
+    return _insert(question, models[0], STAGES[0], auto_approve, params)
 
-    return _insert(question, model, STAGES[0], auto_approve, params)
 
-
-def rerun(job_id: str, model: str | None = None, auto_approve: bool = False) -> Job:
+def rerun(job_id: str, model: str | list[str] | None = None, auto_approve: bool = False) -> Job:
     """A new job that runs a job's pathway again on its approved inputs.
 
     It starts queued at Lens with the source job's plan and exactly the
@@ -413,7 +437,8 @@ def rerun(job_id: str, model: str | None = None, auto_approve: bool = False) -> 
     Args:
         job_id: A research job whose pathway inputs were approved (it got past
             Scout).
-        model: Run on this model instead of the source job's.
+        model: A model, or models, to run on instead of the source job's
+            (which the rerun otherwise copies, with its other_model).
         auto_approve: Go on to Quill without stopping at its gate.
 
     Raises:
@@ -431,12 +456,14 @@ def rerun(job_id: str, model: str | None = None, auto_approve: bool = False) -> 
     if source.kind != "research" or not name or not inputs or not source.plan_path:
         raise ValueError(f"job {job_id} has no approved pathway inputs to rerun: only a "
                          "research job that names a pathway and got past Scout has them")
-    model = model or source.model
-    problems = catalog.check_inputs(name, inputs, model)
+    models = catalog.as_models(model) if model else source.models
+    problems = catalog.check_models(name, inputs, models)
     if problems:
-        raise ValueError(f"job {job_id}'s inputs can't run on {model}: " + "; ".join(problems))
-    return _insert(source.question, model, "lens", auto_approve,
-                   {"pathway": name, "pathway_params": inputs, "rerun_of": source.id},
+        raise ValueError(f"job {job_id}'s inputs can't run on {catalog._on(models)}: " + "; ".join(problems))
+    copied = {"pathway": name, "pathway_params": inputs, "rerun_of": source.id, "models": models}
+    if params.get("other_model"):
+        copied["other_model"] = params["other_model"]
+    return _insert(source.question, models[0], "lens", auto_approve, copied,
                    plan_path=source.plan_path)
 
 

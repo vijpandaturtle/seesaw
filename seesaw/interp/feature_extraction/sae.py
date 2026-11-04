@@ -17,7 +17,7 @@ import re
 _SAE_CACHE: dict[tuple[str, str, str], object] = {}
 
 # TransformerLens model names that SAELens's directory files under another name.
-_MODEL_ALIASES = {"gpt2": "gpt2-small"}
+_MODEL_ALIASES = {"gpt2": "gpt2-small", "Qwen2.5-7B-Instruct": "Qwen/Qwen2.5-7B-Instruct"}
 
 # The residual-stream SAE family to use per model when the caller doesn't
 # name one: the release Neuronpedia hosts, so features come back labelled.
@@ -25,6 +25,7 @@ PREFERRED_RELEASES = {
     "gpt2-small":          "gpt2-small-res-jb",
     "pythia-70m-deduped":  "pythia-70m-deduped-res-sm",
     "gemma-2-2b":          "gemma-scope-2b-pt-res-canonical",
+    "Qwen/Qwen2.5-7B-Instruct": "qwen2.5-7b-instruct-andyrdt",
 }
 
 
@@ -52,7 +53,8 @@ def find_sae(model_name: str, layer: int, release: str | None = None) -> tuple[s
         [PREFERRED_RELEASES[name]] if name in PREFERRED_RELEASES else []
     ) + sorted(r for r, e in directory.items() if e.model == name and "res" in r)
 
-    pattern = re.compile(rf"(?:blocks\.|layer_){layer}(?:[./]|$)")
+    # blocks.8.hook_resid_pre (GPT-2), layer_8/width_16k (Gemma Scope), resid_post_layer_7_trainer_1 (Qwen).
+    pattern = re.compile(rf"(?:blocks\.|layer_){layer}(?:[./_]|$)")
     for rel in dict.fromkeys(candidates):
         entry = directory.get(rel)
         if entry is None:

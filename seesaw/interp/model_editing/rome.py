@@ -75,7 +75,7 @@ def key_covariance(model: HookedTransformer, layer: int, texts: list[str] | None
     """Second moment of MLP keys at `layer`, shrunk toward its mean diagonal so it inverts."""
     k = _keys(model, layer, texts or CORPUS).float()
     c = k.T @ k / k.shape[0]
-    return (1 - shrinkage) * c + shrinkage * c.diagonal().mean() * torch.eye(c.shape[0])
+    return (1 - shrinkage) * c + shrinkage * c.diagonal().mean() * torch.eye(c.shape[0], device=c.device)
 
 
 def _subject_key(model, layer, prompt, subject) -> torch.Tensor:
@@ -94,7 +94,7 @@ def _delta(model, layer, prompt, subject, target_id, steps: int, lr: float, weig
     """The change to the MLP output at the subject's last token that makes `target_id` likely."""
     _, end = subject_span(model, prompt, subject)
     tokens = model.to_tokens(prompt)
-    delta = torch.zeros(model.cfg.d_model, requires_grad=True)
+    delta = torch.zeros(model.cfg.d_model, device=model.cfg.device, requires_grad=True)
     opt = torch.optim.Adam([delta], lr=lr)
 
     def add(value, hook):
@@ -121,7 +121,7 @@ def edit_weights(model: HookedTransformer, layer: int, prompt: str, subject: str
     delta = _delta(model, layer, prompt, subject, tokens_to_ids(model, [target_new])[0],
                    steps, lr, weight_decay)
     c = cov if cov is not None else key_covariance(model, layer)
-    u = torch.linalg.solve(c, k)
+    u = torch.linalg.solve(c.to(k.device), k)
     return torch.outer(u, delta) / (u @ k)
 
 

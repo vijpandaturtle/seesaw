@@ -157,10 +157,17 @@ def orthogonalized(model: HookedTransformer, direction: list[float]):
     they write, so it never contains the direction, which is what the hooks
     enforce at every layer. The difference is that this version ships as a
     checkpoint. The weights are restored on exit.
+
+    Rotary models (Llama, Qwen, Gemma) have no position embedding matrix to
+    project. Gemma-2 also normalises each attention and MLP output after it is
+    written, and the norm's per-dimension weights can put the direction back:
+    there the baked weights won't match the hooks, and the bake check says so.
     """
     unit = torch.tensor(direction, device=model.cfg.device, dtype=model.cfg.dtype)
     unit = unit / unit.norm()
-    params = [model.W_E, model.W_pos]
+    params = [model.W_E]
+    if model.cfg.positional_embedding_type in ("standard", "shortformer"):
+        params.append(model.W_pos)
     for block in model.blocks:
         params += [block.attn.W_O, block.attn.b_O]
         if not model.cfg.attn_only:

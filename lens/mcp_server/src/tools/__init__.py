@@ -15,6 +15,15 @@ from .directional_ablation import run_directional_ablation
 from .features import run_feature_attribution, run_feature_clamping, run_feature_search
 from .edges import run_edge_attribution_patching, run_path_patching
 from .circuit_tracing import run_circuit_tracing
+from .answer_scores import run_answer_scores
+from .probe_transfer import run_probe_transfer
+from .features import run_feature_lookup, run_feature_steering
+from .kv_head_patching import run_kv_head_patching
+from .patchscope import run_patchscope
+from .facts import run_causal_tracing, run_rome_edits
+from .mlp_patching import run_mlp_patching
+from .leace_erasure import run_leace_erasure
+from .model_diff import run_model_diff
 from .lever_tools import LEVER_REGISTRY
 
 from shared.lens_tools import Backend, active_backend
@@ -22,11 +31,15 @@ from shared.lens_tools import Backend, active_backend
 # Keys must match shared/lens_tools.py, the catalog Scout, Quill and the
 # graders read (tests/test_lens_tools.py checks they agree).
 SEESAW_REGISTRY: dict = {
+    "answer_scores":            run_answer_scores,
     "logit_lens":               run_logit_lens,
+    "patchscope":               run_patchscope,
     "attention_pattern":        run_attention_pattern,
     "direct_logit_attribution": run_direct_logit_attribution,
     "linear_probe":             run_linear_probe,
+    "probe_transfer":           run_probe_transfer,
     "feature_search":           run_feature_search,
+    "feature_lookup":           run_feature_lookup,
     "counterfactual":           run_counterfactual,
     "attribution_patching":     run_attribution_patching,
     "feature_attribution":      run_feature_attribution,
@@ -35,11 +48,18 @@ SEESAW_REGISTRY: dict = {
     "ablation":                 run_ablation,
     "activation_patching":      run_activation_patching,
     "head_patching":            run_head_patching,
+    "mlp_patching":             run_mlp_patching,
+    "kv_head_patching":         run_kv_head_patching,
     "circuit_evaluation":       run_circuit_evaluation,
     "path_patching":            run_path_patching,
     "steering_vector":          run_steering_vector,
     "directional_ablation":     run_directional_ablation,
     "feature_clamping":         run_feature_clamping,
+    "feature_steering":         run_feature_steering,
+    "leace_erasure":            run_leace_erasure,
+    "causal_tracing":           run_causal_tracing,
+    "rome_edits":               run_rome_edits,
+    "model_diff":               run_model_diff,
 }
 
 _REGISTRIES = {"seesaw": SEESAW_REGISTRY, "lever": LEVER_REGISTRY}
@@ -74,6 +94,15 @@ ARG_HELP = {
                          "'L9H9->logits'] — take them from edge_attribution_patching's top_edges",
     "features":          "SAE feature indices to switch off, e.g. [658, 16308] — take them from "
                          "feature_attribution's top_features, and use its layer",
+    "subjects":          "the subject of each factual prompt, written exactly as it appears in it, "
+                         "e.g. 'The Eiffel Tower' for 'The Eiffel Tower is located in the city of'",
+    "target_tokens":     "the new answer an edit should write in, one per prompt, e.g. [' Rome']",
+    "test_prompts":      "held-out texts with the property, ideally from another source or topic",
+    "test_counterfactual_prompts": "held-out texts without it, from the same source as test_prompts",
+    "other_model":       "the changed model to compare with, as a TransformerLens model name: a "
+                         "fine-tune or edit of this model, with the same tokenizer",
+    "feature":           "one SAE feature index to steer with, e.g. 658 — from feature_attribution's "
+                         "top_features, with its layer",
     "images":            "one image per prompt (or one for all): a file path, an http(s) URL, "
                          "'text:<words>', 'solid:<colour>', or any of those + '+text:<words>' to stamp "
                          "words on it, e.g. ['photo.jpg', 'text:STOP', 'dog.jpg+text:cat']",
@@ -278,6 +307,17 @@ __all__ = [
     "run_edge_attribution_patching",
     "run_path_patching",
     "run_circuit_tracing",
+    "run_answer_scores",
+    "run_probe_transfer",
+    "run_feature_lookup",
+    "run_causal_tracing",
+    "run_rome_edits",
+    "run_mlp_patching",
+    "run_leace_erasure",
+    "run_model_diff",
+    "run_feature_steering",
+    "run_kv_head_patching",
+    "run_patchscope",
     "TOOL_REGISTRY",
     "SEESAW_REGISTRY",
     "LEVER_REGISTRY",

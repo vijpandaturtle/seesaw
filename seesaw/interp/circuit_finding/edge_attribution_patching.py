@@ -37,7 +37,7 @@ matplotlib.use("Agg")
 from .._helpers import tokens_to_ids
 from ..metrics import logit_diff
 from ..result import InterpResult
-from ._edges import is_sender_hook, receivers, sender_output, senders, split_inputs
+from ._edges import is_sender_hook, n_kv_heads, receivers, sender_output, senders, split_inputs
 
 
 def compute(
@@ -158,6 +158,10 @@ def _plot(model, top, output_dir, clean_ld, corrupt_ld, ig_steps) -> Path:
             return (n_heads / 2, n_layers)
         if name.startswith("MLP"):
             return (n_heads + 0.5, int(name[3:]) + 0.4)
+        if "KV" in name:                      # a grouped-query KV head: the middle of its group
+            layer, g = name.lstrip("L").split("KV")
+            size = n_heads // n_kv_heads(model)
+            return (int(g) * size + (size - 1) / 2, int(layer) - 0.25)
         layer, head = name.lstrip("L").split("H")
         return (int(head), int(layer))
 

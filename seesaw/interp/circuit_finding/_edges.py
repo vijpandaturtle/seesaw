@@ -11,6 +11,12 @@ Names, as edge strings use them:
     receivers  L8H6.q · L8H6.k · L8H6.v · MLP3 · logits
     edges      "L5H5->L8H6.v", "MLP0->L9H9.q", "L9H9->logits"
 
+Grouped-query attention (Llama, Qwen, Gemma-2) shares each key/value head
+across a group of query heads, so there a key or value input belongs to the
+KV head, not to one query head: its receivers are named L8KV1.k and
+L8KV1.v (KV head 1 of layer 8, read by query heads 2g..2g+group-1).
+Queries stay per head (L8H6.q).
+
 Reading per-head inputs needs TransformerLens's use_split_qkv_input and
 use_hook_mlp_in; `split_inputs` switches them on for the duration and
 restores the model's settings after, so callers' models come back unchanged.
@@ -50,11 +56,26 @@ def senders(model: HookedTransformer) -> list[Sender]:
     return out
 
 
+def n_kv_heads(model: HookedTransformer) -> int:
+    """Key/value heads per layer: n_heads unless the model uses grouped-query attention."""
+    return getattr(model.cfg, "n_key_value_heads", None) or model.cfg.n_heads
+
+
+def kv_head(model: HookedTransformer, head: int) -> int:
+    """The KV head query head `head` reads its keys and values from."""
+    return head // (model.cfg.n_heads // n_kv_heads(model))
+
+
 def receivers(model: HookedTransformer) -> list[Receiver]:
     out = []
+    gqa = n_kv_heads(model) != model.cfg.n_heads
     for l in range(model.cfg.n_layers):
         for h in range(model.cfg.n_heads):
-            out += [Receiver(f"L{l}H{h}.{x}", 2 * l + 1, f"blocks.{l}.hook_{x}_input", h) for x in "qkv"]
+            kinds = "q" if gqa else "qkv"
+            out += [Receiver(f"L{l}H{h}.{x}", 2 * l + 1, f"blocks.{l}.hook_{x}_input", h) for x in kinds]
+        if gqa:
+            for g in range(n_kv_heads(model)):
+                out += [Receiver(f"L{l}KV{g}.{x}", 2 * l + 1, f"blocks.{l}.hook_{x}_input", g) for x in "kv"]
         if not model.cfg.attn_only:
             out.append(Receiver(f"MLP{l}", 2 * l + 2, f"blocks.{l}.hook_mlp_in", None))
     last = model.cfg.n_layers - 1
@@ -68,7 +89,8 @@ def parse_edge(edge: str, model: HookedTransformer) -> tuple[Sender, Receiver]:
     r = {x.name: x for x in receivers(model)}.get(dst)
     if s is None or r is None:
         raise ValueError(f"unknown edge {edge!r}: senders look like 'embed', 'L5H5', 'MLP3'; "
-                         f"receivers like 'L8H6.q', 'MLP3', 'logits'")
+                         f"receivers like 'L8H6.q', 'MLP3', 'logits' (and 'L8KV1.v' for a "
+                         f"grouped-query model's key/value heads)")
     if s.order >= r.order:
         raise ValueError(f"{edge!r}: {src} doesn't come before {dst}, so it can't feed it")
     return s, r

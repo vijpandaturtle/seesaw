@@ -35,6 +35,29 @@ TL_FOLD_LN: bool = True
 TL_REFACTOR_FACTORED_ATTN: bool = True
 # Note: do NOT set use_attn_result=True — incompatible with refactor_factored_attn_matrices
 
+
+def tl_load_kwargs(model_name: str) -> dict:
+    """HookedTransformer.from_pretrained settings for `model_name`, the same wherever Lens loads it.
+
+    The QK refactor is skipped for rotary models (Llama, Qwen, Gemma, Pythia):
+    there the QK matrix depends on position, and TransformerLens refuses it.
+    """
+    from transformer_lens.loading_from_pretrained import get_pretrained_model_config
+
+    rotary = get_pretrained_model_config(model_name).positional_embedding_type == "rotary"
+    return {
+        "center_writing_weights": TL_CENTER_WRITING_WEIGHTS,
+        "center_unembed": TL_CENTER_UNEMBED,
+        "fold_ln": TL_FOLD_LN,
+        "refactor_factored_attn_matrices": TL_REFACTOR_FACTORED_ATTN and not rotary,
+    }
+
+
+# ── GPU (SEESAW_LENS_BACKEND=modal) ───────────────────────────────────────────
+# Which GPU a model runs on lives in shared/gpus.py, torch-free, so job cost
+# estimates price the same GPU the run uses.
+from shared.gpus import GPU_LARGE, GPU_SMALL, LARGE_MODEL_PARAMS_B, gpu_for  # noqa: E402,F401
+
 # ── Sandbox ───────────────────────────────────────────────────────────────────
 SANDBOX_TIMEOUT: int = int(os.getenv("SEESAW_SANDBOX_TIMEOUT", "300"))   # seconds — ablation/patching can be slow on CPU
 # Tools that re-run the model once per layer for every prompt. On a VLM with

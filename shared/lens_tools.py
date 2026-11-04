@@ -37,8 +37,14 @@ class LensTool(NamedTuple):
 
 LENS_TOOLS: dict[str, LensTool] = {
     # ── descriptive ──────────────────────────────────────────────────────────
+    "answer_scores": LensTool(
+        "descriptive", "the answer token's probability on each prompt, and its logit diff over negative_tokens: "
+                       "does the model do the task at all?"),
     "logit_lens": LensTool(
         "descriptive", "project the residual stream at each layer to vocabulary: where the prediction forms"),
+    "patchscope": LensTool(
+        "descriptive", "decode each layer's last-token hidden state by patching it into an identity prompt, beside "
+                       "the logit lens: where the answer is encoded, read by the model itself"),
     "attention_pattern": LensTool(
         "descriptive", "attention weights per head per layer: what each head looks at"),
     "direct_logit_attribution": LensTool(
@@ -46,8 +52,14 @@ LENS_TOOLS: dict[str, LensTool] = {
     "linear_probe": LensTool(
         "descriptive", "is a concept linearly decodable from the residual stream, and from which layer "
                        "(prompts vs counterfactual_prompts)"),
+    "probe_transfer": LensTool(
+        "descriptive", "train a probe on prompts vs counterfactual_prompts and score it on held-out test_prompts vs "
+                       "test_counterfactual_prompts, against shuffled labels, embeddings alone and bag-of-words"),
     "feature_search": LensTool(
         "descriptive", "which SAE features fire on the prompts, with Neuronpedia's explanations; no gradients"),
+    "feature_lookup": LensTool(
+        "descriptive", "Neuronpedia's explanation, promoted and suppressed tokens for named SAE `features` at a "
+                       "layer"),
     "counterfactual": LensTool(
         "descriptive", "swap one attribute in the input (counterfactual_prompts) and measure how far the "
                        "output moves; inputs and outputs only"),
@@ -71,6 +83,11 @@ LENS_TOOLS: dict[str, LensTool] = {
         "causal", "patch the clean residual stream into the corrupted run by layer and position"),
     "head_patching": LensTool(
         "causal", "patch named heads from clean into corrupted, each alone and all together"),
+    "mlp_patching": LensTool(
+        "causal", "patch each MLP layer's output from clean into corrupted, one layer at a time"),
+    "kv_head_patching": LensTool(
+        "causal", "patch each key/value head's keys, values and both from clean into corrupted; in grouped-query "
+                  "models (Llama, Qwen, Gemma) a KV head serves a group of query heads"),
     "circuit_evaluation": LensTool(
         "causal", "how much behaviour a set of heads keeps (faithfulness) and removes (necessity), vs random "
                   "head sets"),
@@ -85,6 +102,21 @@ LENS_TOOLS: dict[str, LensTool] = {
     "feature_clamping": LensTool(
         "causal", "switch named SAE features off (or set them to a value) and measure the logit diff, vs random "
                   "features"),
+    "feature_steering": LensTool(
+        "causal", "push the residual stream along one SAE `feature`'s decoder direction at its layer and sweep "
+                  "the strength, vs random directions, with a loss check"),
+    "leace_erasure": LensTool(
+        "causal", "erase what separates prompts from counterfactual_prompts (LEACE, every residual site, fitted on "
+                  "held-out pairs): does the attribute's pull go, and does the task survive? vs random erasers"),
+    "causal_tracing": LensTool(
+        "causal", "noise the subject's embeddings (needs `subjects`), restore residual / MLP / attention at each "
+                  "layer and position: where a fact is retrieved"),
+    "rome_edits": LensTool(
+        "causal", "rewrite each fact to target_tokens with ROME at each layer, scored on efficacy, paraphrase and "
+                  "specificity: where a fact can be edited"),
+    "model_diff": LensTool(
+        "causal", "compare the model with other_model (a fine-tune or edit of it): KL per prompt, tokens it "
+                  "favours, and which component's weights account for the change"),
 }
 
 
@@ -115,12 +147,40 @@ LEVER_TOOLS: dict[str, LensTool] = {
 
 _CATALOGS: dict[str, dict[str, LensTool]] = {"seesaw": LENS_TOOLS, "lever": LEVER_TOOLS}
 
+# The model a job runs on when the user names none (CLI without --model, old
+# rows): the one every tool covers, feature_explain and circuit_tracing
+# included. Gated on Hugging Face, so the GPU app needs an HF token.
+DEFAULT_MODEL = "google/gemma-2-2b"
+
+# The models Lens runs (TransformerLens names), with what each can and can't
+# do. The dashboard offers the same list. GPU sizes are shared/gpus.py's.
+MODELS: dict[str, str] = {
+    "google/gemma-2-2b": "every tool works on it: SAE tools and feature_explain (Gemma Scope, every "
+                         "layer), circuit_tracing on its own graphs; gated (needs the HF token)",
+    "meta-llama/Llama-3.2-1B": "no published SAEs (no SAE tools, no feature_explain); gated",
+    "meta-llama/Llama-3.2-3B": "no published SAEs; gated",
+    "Qwen/Qwen2.5-0.5B": "small and fast; no published SAEs; open",
+    "Qwen/Qwen2.5-1.5B": "no published SAEs; open",
+    "Qwen/Qwen2.5-3B": "no published SAEs; open",
+    "Qwen/Qwen2.5-7B": "runs on an A100 (costs about 3x more per second); no published SAEs; open",
+    "Qwen/Qwen2.5-7B-Instruct": "the instruction-tuned 7B: SAE tools and feature_explain (every 4th "
+                                "layer); A100; open",
+}
+
+
+def models_brief() -> str:
+    """The supported models as a bullet list, for Scout's prompts."""
+    return "\n".join(f"- `{m}`: {note}" for m, note in MODELS.items())
+
 # What Scout and Lens's planner are told about models and inputs, per backend.
 PLANNING_NOTES: dict[str, str] = {
     "seesaw": (
-        "Experiments run with TransformerLens on small text models. Prefer GPT-2 Small and Pythia "
-        "(fast, well-studied); SAE tools need a model Neuronpedia hosts SAEs for (e.g. gpt2-small), and "
-        "circuit_tracing reads gemma-2-2b graphs."
+        "Experiments run with TransformerLens on Modal GPUs, on the models the user chose for the job "
+        "(each experiment names one of them, written in full). What each model supports: "
+        + "; ".join(f"{m}: {note}" for m, note in MODELS.items()) + ". "
+        "The SAE tools need published SAEs, so only google/gemma-2-2b and Qwen/Qwen2.5-7B-Instruct. circuit_tracing reads Neuronpedia graphs for gemma-2-2b and the models "
+        "it lists. Llama, Qwen and Gemma use grouped-query attention: heads in a group share keys and "
+        "values, so use kv_head_patching for keys and values."
     ),
     "lever": (
         "Experiments run through lever on vision-language models, as Hugging Face checkpoints: "
@@ -140,7 +200,10 @@ TOOL_CHAINS: dict[str, str] = {
     "seesaw": (
         "attribution_patching or direct_logit_attribution -> head_patching or ablation with `heads` -> "
         "circuit_evaluation; edge_attribution_patching -> path_patching; counterfactual -> linear_probe -> "
-        "directional_ablation or steering_vector; feature_attribution -> feature_clamping. "
+        "directional_ablation or steering_vector or leace_erasure; feature_attribution -> feature_clamping, "
+        "feature_lookup, feature_steering; answer_scores -> causal_tracing -> rome_edits for facts; linear_probe -> probe_transfer; "
+        "attribution_patching -> mlp_patching for MLPs; head_patching -> kv_head_patching on grouped-query models; "
+        "logit_lens -> patchscope where the logit lens reads nothing. "
         "circuit_tracing reads attribution graphs from Neuronpedia for gemma-2-2b only."
     ),
     "lever": (

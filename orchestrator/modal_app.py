@@ -7,10 +7,12 @@ to an hour, well past any serverless request limit. The dashboard inserts a
 queued row and calls `run_stage.spawn(job_id)`, which returns immediately while
 the work continues here — so there is no always-on machine and nothing to poll.
 
-Scout, Quill, and Lens's graph run in this container. The five Lens experiment
-tools do not: SEESAW_LENS_BACKEND=modal sends those to the GPU app in
+Scout, Quill, and Lens's graph run in this container. Lens's experiment tools
+do not: SEESAW_LENS_BACKEND=modal sends those to the GPU app in
 lens/modal_app.py, so this one stays on CPU. A job's pathway (seesaw.pathways)
-does run here, on CPU: fine for GPT-2-sized models, slow for larger ones.
+is driven from here, but each of its steps is a call to one of those same
+tools, so its forward passes run on the GPU app too. Deploy lens/modal_app.py
+first whenever the tool registry gains a tool a pathway calls.
 
 Artifacts go to a Volume rather than the container filesystem, which is
 discarded when the function returns, and `artifacts` serves them back to the

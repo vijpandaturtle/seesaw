@@ -111,3 +111,27 @@ def test_describe_reads_like_a_receipt(monkeypatch):
 
 def test_amounts_are_written_plainly():
     assert costs.usd(1.234) == "$1.23" and costs.usd(0.001) == "<$0.01" and costs.usd(None) == "?"
+
+
+def test_each_model_is_priced_on_the_gpu_it_runs_on(monkeypatch):
+    monkeypatch.setenv("SEESAW_LENS_BACKEND", "modal")
+    fixed = costs.LENS_COLD_START_SECONDS + costs.LENS_IDLE_SECONDS
+    small = {**experiment(10), "data": {"model": "Qwen/Qwen2.5-0.5B"}}
+    large = {**experiment(10), "data": {"model": "Qwen/Qwen2.5-7B"}}
+    record = costs.stage_cost([stage("lens", 60), small, large], "lens")
+    assert record["gpu"] == "A100-80GB, A10G"
+    # Both containers load and idle; each is billed at its own rate.
+    assert record["gpu_usd"] == pytest.approx(
+        (10 + fixed) * costs.GPU_PER_SECOND["A10G"] + (10 + fixed) * costs.GPU_PER_SECOND["A100-80GB"],
+        abs=1e-4)
+    assert record["gpu_fixed_seconds"] == 2 * fixed
+
+
+def test_an_estimate_runs_the_plan_on_every_model(monkeypatch):
+    monkeypatch.setenv("SEESAW_LENS_BACKEND", "modal")
+    one = costs.estimate("lens", [], plan_text="`ablation`", models=["Qwen/Qwen2.5-0.5B"])
+    two = costs.estimate("lens", [], plan_text="`ablation`",
+                         models=["Qwen/Qwen2.5-0.5B", "Qwen/Qwen2.5-7B"])
+    assert two["gpu"] == "A100-80GB, A10G"
+    assert two["llm_usd"] == pytest.approx(2 * one["llm_usd"])
+    assert two["gpu_usd"] > 2 * one["gpu_usd"]       # the second model is on the dearer GPU
