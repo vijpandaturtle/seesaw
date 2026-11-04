@@ -37,7 +37,7 @@ def test_every_stage_is_given_the_jobs_folder(jobs, tmp_path, monkeypatch):
 
     seen = {}
 
-    def fake_scout(question, thread_id, output_dir):
+    def fake_scout(question, thread_id, output_dir, **_):
         seen["scout"] = output_dir
         output_dir.mkdir(parents=True)
         (plan := output_dir / "research_plan.md").write_text("plan")

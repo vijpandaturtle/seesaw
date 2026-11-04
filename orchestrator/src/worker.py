@@ -1,7 +1,11 @@
 """Run a job's stages: Scout → Lens → Quill.
 
 A job that names a pathway (params = {"pathway": name}) runs it as part of
-the research, and the pathway is binding: Scout only chooses its inputs,
+the research, and the pathway is binding: Scout only chooses its inputs.
+With params = {"pathway": "auto"}, Scout chooses the pathway too, or none;
+its choice replaces "auto" in params["pathway"] (or removes it), with
+params["pathway_request"] = "auto" kept so a retried Scout stage chooses again
+and params["pathway_why"] holding its reason. Either way, the inputs go in
 which are checked (and sent back to Scout to fix, at most twice) and saved as
 params["pathway_params"] for the human gate to show. Lens's stage then runs
 the pathway on exactly those inputs before any of Lens's own experiments,
@@ -71,10 +75,12 @@ def run_scout_stage(job: Job) -> None:
     from .clients.scout_client import MAX_REVISIONS, run_scout
 
     params = job.params_dict
-    name = params.get("pathway")
+    search = bool(params.get("search"))
+    # A retry under "auto" chooses again, rather than inheriting the last choice.
+    name = params.get("pathway_request") or params.get("pathway")
     if not name:
         plan_path = run_scout(job.question, thread_id=f"job-{job.id}-scout",
-                              output_dir=jobs.job_dir(job.id))
+                              output_dir=jobs.job_dir(job.id), search=search)
         jobs.update(job.id, plan_path=str(plan_path))
         return
 
@@ -82,11 +88,15 @@ def run_scout_stage(job: Job) -> None:
 
     from seesaw.pathways import catalog
 
+    if name == catalog.AUTO:
+        _scout_chooses(job, params, search)
+        return
+
     def check(path: Path) -> list[str]:
         return catalog.extract_inputs(name, path.read_text(), job.model)[1]
 
     plan_path = run_scout(job.question, thread_id=f"job-{job.id}-scout",
-                          output_dir=jobs.job_dir(job.id),
+                          output_dir=jobs.job_dir(job.id), search=search,
                           brief=catalog.scout_brief(name, job.model), check=check)
     inputs, errors = catalog.extract_inputs(name, plan_path.read_text(), job.model)
     # Inputs from an earlier Scout run don't belong to this plan.
@@ -100,6 +110,39 @@ def run_scout_stage(job: Job) -> None:
     print(f"   {name} inputs validated: {len(inputs['prompts'])} prompts")
 
 
+def _scout_chooses(job: Job, params: dict, search: bool) -> None:
+    """Scout picks the pathway (or none) and its inputs; the choice is written into params."""
+    from pathlib import Path
+
+    from seesaw.pathways import catalog
+
+    from .clients.scout_client import MAX_REVISIONS, run_scout
+
+    def check(path: Path) -> list[str]:
+        return catalog.extract_choice(path.read_text(), job.model)[3]
+
+    plan_path = run_scout(job.question, thread_id=f"job-{job.id}-scout",
+                          output_dir=jobs.job_dir(job.id), search=search,
+                          brief=catalog.choice_brief(job.model), check=check)
+    name, inputs, why, errors = catalog.extract_choice(plan_path.read_text(), job.model)
+    # Whatever an earlier Scout run chose doesn't belong to this plan.
+    for key in ("pathway", "pathway_params", "pathway_why"):
+        params.pop(key, None)
+    params["pathway_request"] = catalog.AUTO
+    if errors:
+        jobs.update(job.id, plan_path=str(plan_path), params=json.dumps(params))
+        raise RuntimeError(f"Scout's pathway choice is still invalid after {MAX_REVISIONS} "
+                           "revisions: " + "; ".join(errors))
+    params["pathway_why"] = why
+    if name:
+        params.update(pathway=name, pathway_params=inputs)
+    jobs.update(job.id, plan_path=str(plan_path), params=json.dumps(params))
+    events.emit(events.CHECK, "pathway choice", status=events.OK,
+                summary=(f"Scout chose {name}: {why}" if name else f"Scout chose no pathway: {why}"),
+                data={"pathway": name, "why": why})
+    print(f"   Scout chose {name or 'no pathway'}: {why}")
+
+
 def run_lens_stage(job: Job) -> None:
     from .clients.lens_client import run_lens
 
@@ -110,11 +153,11 @@ def run_lens_stage(job: Job) -> None:
 
     plan_text = Path(job.plan_path).read_text()
     params = job.params_dict
-    if params.get("pathway"):
+    if params.get("pathway") or params.get("pathway_request"):
         from seesaw.pathways import catalog
 
-        # Lens gets the plan without the pathway's inputs, so it can't take
-        # the pathway's prompts for one more experiment.
+        # Lens gets the plan without the pathway's inputs (or Scout's choice of
+        # none), so it can't take them for one more experiment.
         plan_text = catalog.without_inputs(plan_text)
     plan_text += _MODEL_OVERRIDE.format(model=job.model)
 

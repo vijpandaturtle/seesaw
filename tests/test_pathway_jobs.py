@@ -160,7 +160,7 @@ def test_a_queued_pathway_job_fails_saying_what_to_do_instead(jobs):
 
 
 def test_hand_entered_inputs_cant_start_a_job(jobs):
-    with pytest.raises(ValueError, match="name only a pathway"):
+    with pytest.raises(ValueError, match="params are only"):
         jobs.create("x", params={"pathway": "circuit_discovery", **IOI})
     with pytest.raises(TypeError):
         jobs.create("x", kind="pathway", params={"pathway": "circuit_discovery", **IOI})

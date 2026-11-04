@@ -34,12 +34,24 @@ Start with these: when the verdict comes back you know what it should have said.
 
 ## Running one
 
-A pathway always runs as part of a research job. You ask the question and name the pathway, and:
+A pathway always runs as part of a research job. You ask the question and either name the pathway or
+let Scout choose one:
 
-1. **Scout** researches the question and chooses the pathway's inputs: prompts, answer tokens,
-   contrasts. The worker checks them (aligned lists, every answer a single token for the model) and
-   sends Scout any problems to fix, up to twice.
-2. **You approve** the plan and the inputs at the gate, before anything runs on a model.
+- `--pathway <name>`: that pathway runs, and Scout only chooses its inputs. Use this when you know
+  which one you want, and always for evaluation, where the pathway has to be fixed by the task.
+- `--pathway auto` (the default): Scout reads the list of pathways and picks the one that answers the
+  question, with a one-sentence reason, or picks none if nothing fits and plans the experiments
+  itself.
+- `--pathway none`: no pathway; Scout plans freely.
+
+Then:
+
+1. **Scout** plans the job and chooses the pathway's inputs: prompts, answer tokens, contrasts. The
+   worker checks them (aligned lists, every answer a single token for the model) and sends Scout any
+   problems to fix, up to twice. Scout plans from the question and what it knows; add `--search` to
+   let it search arXiv and the web as well. Without search it cites no papers as sources.
+2. **You approve** the plan, the pathway Scout chose (and why), and its inputs at the gate, before
+   anything runs on a model.
 3. **Lens** runs the pathway first, on exactly those inputs, then any extra experiments in the
    plan.
 4. **Quill** critiques the result, with the pathway's verdict as the primary evidence.
@@ -54,8 +66,8 @@ The inputs each pathway takes are listed in [`seesaw/pathways/catalog.py`](../se
 
 ### Reproducing a result
 
-Scout uses an LLM and searches the web, so asking the same question twice gives different inputs, and
-there's no seed that fixes that. The pathways themselves are deterministic (their random baselines are
+Scout uses an LLM (and, with `--search`, the web), so asking the same question twice can give a
+different pathway or different inputs, and there's no seed that fixes that. A rerun keeps both. The pathways themselves are deterministic (their random baselines are
 seeded): the same pathway version on the same model and inputs gives the same verdict.
 
 So a result is reproduced by **rerunning** its job: a new job starts at Lens with the same plan and

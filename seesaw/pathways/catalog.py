@@ -10,10 +10,14 @@ and one contrast prompt per prompt where it takes them. `validate` checks
 that; `check_inputs` also checks every answer token is one token for the
 model.
 
-A research job names a pathway, and the pathway is binding: Scout only
-chooses its inputs. `scout_brief` tells Scout what they are, and
-`extract_inputs` reads them back out of the saved plan and checks them. A
-rerun checks the saved inputs again against its own model before queueing.
+A research job either names a pathway or asks Scout to choose one (AUTO).
+A named pathway is binding: Scout only chooses its inputs. `scout_brief`
+tells Scout what they are, and `extract_inputs` reads them back out of the
+saved plan and checks them. Under AUTO, `choice_brief` lists every pathway
+and Scout picks one (or none, if nothing fits) along with its inputs and a
+reason; `extract_choice` reads that back. Either way the choice and inputs
+stop at the human gate, and a rerun keeps them fixed. A rerun checks the
+saved inputs again against its own model before queueing.
 """
 
 from __future__ import annotations
@@ -186,6 +190,71 @@ def version(name: str) -> str:
     return PATHWAYS[name].version
 
 
+# A job's pathway param that asks Scout to choose the pathway.
+AUTO = "auto"
+
+
+def _describe(key: str, kind: str) -> str:
+    return f"- `{key}` ({kind}): {INPUTS[key]}."
+
+
+def _input_rules(model: str) -> list[str]:
+    return [
+        "Rules for the inputs:",
+        "- Every value is a list of strings, except a pathway's single-string inputs (marked",
+        "  below). \"One per prompt\" means exactly as many entries as `prompts`, in the same order.",
+        "- Answer tokens need a leading space (\" Mary\", not \"Mary\") and must each be a",
+        f"  single token in {model}'s tokenizer; prefer short, common words.",
+        "- Each prompt should end right before the answer, so the answer is the next token.",
+        "- Use at least 8 prompts where the task allows it; vary names and wording.",
+    ]
+
+
+def choice_brief(model: str = "gpt2") -> str:
+    """Tell Scout it may choose one of the pathways for this job, or none.
+
+    Scout writes its choice as one fenced json block: {"pathway": name or
+    null, "why": ..., "params": {...}}, which `extract_choice` reads back.
+    """
+    lines = [
+        "## Choose a pathway (or none)",
+        "",
+        "A pathway is a hand-coded investigation with a fixed verdict, checked against known",
+        f"results. If one of these answers the question on {model}, choose it: it runs first,",
+        "exactly on the inputs you give, and is the job's primary evidence. You choose its inputs",
+        "and say why it fits. If none answers the question, choose none and plan the experiments",
+        "yourself; don't bend the question to fit a pathway.",
+        "",
+    ]
+    for name, pathway in PATHWAYS.items():
+        if name == "attribute_audit":
+            continue                  # an older name for concept_direction
+        if name == "feature_explain" and model not in SAE_MODELS:
+            continue
+        needs = ", ".join(f"`{k}`" for k in pathway.required)
+        needs += "".join(f", `{k}` (one string)" for k in pathway.text_inputs)
+        end = "" if pathway.summary.endswith("?") else "."
+        lines.append(f"- `{name}`: {pathway.summary}{end} Needs {needs}"
+                     + (f"; optional {', '.join(f'`{k}`' for k in pathway.optional)}" if pathway.optional else "")
+                     + ".")
+    used = dict.fromkeys(k for pw in PATHWAYS.values()
+                         for k in (*pw.required, *pw.text_inputs, *pw.optional))
+    lines += ["", "What the inputs mean:", *(_describe(k, "input") for k in used), "",
+              *_input_rules(model), "",
+              "Put your choice in the plan you save, as exactly one fenced ```json block:",
+              "",
+              "```json",
+              json.dumps({"pathway": "<name>", "why": "<one sentence: why it answers the question>",
+                          "params": {"prompts": ["..."], "...": ["..."]}}),
+              "```",
+              "",
+              'or, if no pathway fits: {"pathway": null, "why": "<why none fits>"}.',
+              "",
+              "The block is checked before the job continues; if it is invalid you will be told why",
+              "and asked to save a corrected plan."]
+    return "\n".join(lines)
+
+
 def scout_brief(name: str, model: str = "gpt2") -> str:
     """Tell Scout which pathway will run and what it has to choose.
 
@@ -193,9 +262,7 @@ def scout_brief(name: str, model: str = "gpt2") -> str:
     one fenced json block in the plan, which `extract_inputs` reads back.
     """
     pathway = PATHWAYS[name]
-
-    def describe(key: str, kind: str) -> str:
-        return f"- `{key}` ({kind}): {INPUTS[key]}."
+    describe = _describe
 
     lines = [
         f"## Required pathway: `{name}` (version {pathway.version})",
@@ -209,16 +276,10 @@ def scout_brief(name: str, model: str = "gpt2") -> str:
         *(describe(k, "required") for k in (*pathway.required, *pathway.text_inputs)),
         *(describe(k, "optional") for k in pathway.optional),
         "",
-        "Rules for the inputs:",
-        "- Every value is a list of strings" + (", except " + ", ".join(f"`{k}`" for k in pathway.text_inputs)
-                                                + ", a single string" if pathway.text_inputs else "")
-        + ". \"One per prompt\" means exactly as many entries",
-        "  as `prompts`, in the same order.",
-        "- Answer tokens need a leading space (\" Mary\", not \"Mary\") and must each be a",
-        f"  single token in {model}'s tokenizer; prefer short, common words.",
-        "- Each prompt should end right before the answer, so the answer is the next token.",
-        "- Use at least 8 prompts where the task allows it; vary names and wording.",
+        *_input_rules(model),
     ]
+    if pathway.text_inputs:
+        lines.append("- " + ", ".join(f"`{k}`" for k in pathway.text_inputs) + " is a single string, not a list.")
     if name == "feature_explain":
         lines.append(f"- This pathway only runs on gpt2 (its SAE is {SAE_RELEASE}).")
     lines += [
@@ -237,6 +298,46 @@ def scout_brief(name: str, model: str = "gpt2") -> str:
 
 
 _JSON_BLOCK = re.compile(r"```json\s*\n(.*?)\n\s*```", re.DOTALL)
+
+
+def _pathway_blocks(plan_text: str) -> tuple[list[dict], list[str]]:
+    """Every ```json block in the plan that names a pathway (key present, even if null)."""
+    blocks = []
+    for raw in _JSON_BLOCK.findall(plan_text):
+        try:
+            value = json.loads(raw)
+        except json.JSONDecodeError as exc:
+            return [], [f"the ```json block is not valid JSON: {exc}"]
+        if isinstance(value, dict) and "pathway" in value:
+            blocks.append(value)
+    return blocks, []
+
+
+def extract_choice(plan_text: str, model: str = "gpt2") -> tuple[str | None, dict | None, str, list[str]]:
+    """Read the pathway Scout chose (or declined) under AUTO, with its inputs, and check them.
+
+    Returns:
+        (name, params, why, []) for a usable choice; (None, None, why, []) when
+        Scout chose none; (None, None, "", errors) when the block can't be used.
+    """
+    blocks, errors = _pathway_blocks(plan_text)
+    if errors:
+        return None, None, "", errors
+    if not blocks:
+        return None, None, "", ['no ```json block with {"pathway": ..., "why": ...} found in the plan']
+    if len(blocks) > 1:
+        return None, None, "", [f"found {len(blocks)} pathway ```json blocks; write exactly one"]
+    block = blocks[0]
+    name, why = block.get("pathway"), str(block.get("why") or "").strip()
+    if not why:
+        return None, None, "", ['the block needs a "why": one sentence on why this pathway (or none) fits']
+    if name is None:
+        return None, None, why, []
+    if name not in PATHWAYS or name == "attribute_audit":
+        choices = [n for n in names() if n != "attribute_audit"]
+        return None, None, "", [f"unknown pathway {name!r}; choose one of {choices}, or null"]
+    errors = check_inputs(name, block.get("params") or {}, model)
+    return (None, None, "", errors) if errors else (name, block["params"], why, [])
 
 
 def extract_inputs(name: str, plan_text: str, model: str = "gpt2") -> tuple[dict | None, list[str]]:
@@ -279,6 +380,8 @@ def without_inputs(plan_text: str) -> str:
             return match.group(0)
         if isinstance(value, dict) and "params" in value:
             return "_(Pathway inputs removed: the pathway has already been run on them.)_"
+        if isinstance(value, dict) and "pathway" in value:
+            return "_(Pathway choice removed: Scout chose not to run a pathway.)_"
         return match.group(0)
 
     return _JSON_BLOCK.sub(replace, plan_text)

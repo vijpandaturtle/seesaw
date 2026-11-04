@@ -12,7 +12,7 @@ from shared.db import events
 MAX_REVISIONS = 2
 
 _REVISE = (
-    "The plan you saved can't be used yet. Its pathway inputs failed validation:\n\n"
+    "The plan you saved can't be used yet. Its pathway block failed validation:\n\n"
     "{errors}\n\n"
     "Fix every problem above and call save_research_plan again with the full "
     "corrected plan, including exactly one fenced ```json pathway block. "
@@ -28,10 +28,11 @@ def run_scout(
     brief: str | None = None,
     check: Callable[[Path], list[str]] | None = None,
     max_revisions: int = MAX_REVISIONS,
+    search: bool = True,
 ) -> Path:
     """Run the Scout agent on a research question.
 
-    Scout searches arXiv and the web, then calls save_research_plan
+    Scout searches arXiv and the web (when `search` is on), then calls save_research_plan
     to write the plan to disk. This function streams the agent until
     that tool call completes, then returns the plan path.
 
@@ -55,6 +56,7 @@ def run_scout(
             whose inputs Scout has to choose (catalog.scout_brief).
         check: Plan path -> list of problems; [] when the plan is usable.
         max_revisions: How many corrected plans to ask for.
+        search: Give Scout its literature search tools.
 
     Returns:
         Path to the saved research plan markdown file.
@@ -62,10 +64,11 @@ def run_scout(
     Raises:
         RuntimeError: If Scout finishes without saving a plan.
     """
-    agent  = build_agent(output_dir=output_dir)
+    agent  = build_agent(output_dir=output_dir, search=search)
     config = {"configurable": {"thread_id": thread_id}, "callbacks": events.callbacks()}
 
-    print(f"🔍 Scout starting — question: {research_question!r}")
+    print(f"🔍 Scout starting — question: {research_question!r}"
+          + ("" if search else " (literature search off)"))
 
     message = research_question if brief is None else f"{research_question}\n\n{brief}"
     plan_path = _turn(agent, config, message, output_dir, verbose)
