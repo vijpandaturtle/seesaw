@@ -261,7 +261,7 @@ def test_lens_runs_the_pathway_first_on_the_approved_inputs(jobs, scout, pathway
     bundle = json.loads(open(after.bundle_path).read())
     first, extra = bundle["results"]
     assert (first["role"], first["name"], first["tool"]) == (
-        "pathway", "pathway:circuit_discovery", "circuit_discovery@v1")
+        "pathway", "pathway:circuit_discovery", f"circuit_discovery@v{catalog.version('circuit_discovery')}")
     assert first["data"]["verdict"] == "circuit_found"
     assert first["tool_kwargs"] == IOI
     assert (extra["role"], extra["name"]) == ("extra", "logit_lens_ioi")

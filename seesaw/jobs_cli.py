@@ -343,7 +343,9 @@ def add_parser(sub) -> None:
     p = js.add_parser("submit", help="create a job and start its first stage")
     p.add_argument("question")
     p.add_argument("--pathway", help="run this seesaw pathway as part of the job; Scout chooses its "
-                                     "inputs (circuit_discovery, attribute_audit, feature_explain)")
+                                     "inputs (circuit_discovery, concept_direction, probe_monitor, "
+                                     "spurious_audit, factual_recall, editing_comparison, "
+                                     "model_diffing, feature_explain)")
     p.add_argument("--model", default="gpt2", help="model Lens should target (default: gpt2)")
     p.add_argument("--auto-approve", action="store_true", help="run all stages without approval gates")
     runner_arg(p)

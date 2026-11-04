@@ -11,6 +11,8 @@ and adapt the result for Lens's agent loop.
 - `activation_patching` (built)
 - `attribution_patching` (built) — every head's and MLP's patching effect estimated from one backward pass; nominates
 - `head_patching` (built) — real patching of a shortlist of heads, alone and together; verifies
+- `mlp_patching` (built; library and pathways only) — patch each MLP layer's output alone
+- `causal_tracing` (built; library and pathways only) — ROME-style tracing: noise the subject, restore the residual stream, MLP or attention output by layer and position
 
 ## Not yet implemented
 New techniques here get built the same way: the real logic goes in

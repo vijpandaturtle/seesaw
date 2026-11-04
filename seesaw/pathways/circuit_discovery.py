@@ -11,10 +11,12 @@ Measure → nominate → verify → evaluate:
      mean-ablation sweep takes its place, which is fine on small models only.
 3. Verify — real interventions on the shortlist only. Head patching with
    corrupted prompts, mean ablation without. A head is confirmed when its
-   effect alone clears CONFIRM_EFFECT.
-4. Evaluate — mean-ablate everything outside the confirmed heads and see how
+   effect alone clears CONFIRM_EFFECT. With corrupted prompts, every MLP
+   layer is patched too, and confirmed by the same bar.
+4. Evaluate — mean-ablate every head outside the confirmed heads and see how
    much behaviour survives (faithfulness), against random circuits of the
-   same size.
+   same size. MLPs are left running in both, so faithfulness is the heads'
+   share given the MLPs, not the circuit's share of the whole model.
 5. Wire (with corrupted prompts) — which connections carry it. Edge
    attribution patching (EAP-IG) ranks every sender → receiver edge; path
    patching measures the top EDGE_K, and an edge is confirmed when patching
@@ -29,7 +31,9 @@ Head roles in `findings`:
   backup heads, which only matter once the primary ones are removed.
 - writes_against_answer — DLA-negative heads (negative name movers in IOI).
 
-Verdicts: no_effect · circuit_found · partial_circuit · no_circuit
+Verdicts: no_effect · circuit_found · partial_circuit · no_circuit.
+Without corrupted prompts the verdict is at most partial_circuit: mean
+ablation alone is too weak evidence to call a circuit found.
 """
 
 from __future__ import annotations
@@ -40,7 +44,7 @@ import torch
 from transformer_lens import HookedTransformer
 
 from seesaw.interp._helpers import parse_head, tokens_to_ids, top_heads
-from seesaw.interp.causal_interventions import ablation, attribution_patching, head_patching
+from seesaw.interp.causal_interventions import ablation, attribution_patching, head_patching, mlp_patching
 from seesaw.interp.circuit_finding import (
     circuit_evaluation, edge_attribution_patching, path_patching,
 )
@@ -163,6 +167,15 @@ def run(
         result.evidence.append(
             f"All {len(shortlist)} shortlisted heads patched together recover "
             f"{verify.data['joint_recovery']:.0%}.")
+    if corrupted_prompts:
+        mp = mlp_patching.compute(model, prompts, corrupted_prompts, positive_tokens, negative_tokens, output_dir)
+        result.steps["mlp_patching"] = mp
+        mlps = {f"MLP{l}": r for l, r in mp.data["per_layer"].items() if r >= CONFIRM_EFFECT}
+        result.findings["confirmed_mlps"] = mlps
+        if mlps:
+            result.evidence.append(
+                "MLP layers that recover the effect alone: "
+                + ", ".join(f"{n} {r:.0%}" for n, r in sorted(mlps.items(), key=lambda kv: -kv[1])[:4]) + ".")
     if not confirmed:
         return result.stop("no_circuit", f"no shortlisted head reached {CONFIRM_EFFECT:.0%} alone")
 
@@ -182,10 +195,14 @@ def run(
     result.evidence.append(
         f"Ablating them removes {ev.data['necessity']:.0%} (random: {ev.data['random_necessity']:.0%}).")
 
-    if faith >= FAITHFUL_MIN and faith - rand >= RANDOM_MARGIN:
+    if faith >= FAITHFUL_MIN and faith - rand >= RANDOM_MARGIN and corrupted_prompts:
         result.verdict = "circuit_found"
     else:
         result.verdict = "partial_circuit"
+        if faith >= FAITHFUL_MIN and faith - rand >= RANDOM_MARGIN:
+            result.evidence.append(
+                "Faithful enough to call a circuit, but found by ablation alone: capped at partial_circuit "
+                "until it's confirmed with corrupted prompts.")
 
     # ── 5. Wire ───────────────────────────────────────────────────────────────
     if corrupted_prompts:

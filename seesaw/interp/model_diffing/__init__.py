@@ -1,15 +1,5 @@
 """Model Diffing — Comparing two model checkpoints — needs two models as input, a different tool shape than everything else here.
 
-Nothing implemented yet. See `lens/mcp_server/src/tools/model_diffing/README.md` for the planned techniques and
-their one-line descriptions.
-
-Pattern to follow when implementing one (matches visualization/ and
-causal_interventions/, the two categories already built):
-
-    def compute(model, prompts, output_dir, *technique_specific_args, **kwargs) -> InterpResult:
-        ...
-        return InterpResult(data={...}, plot_paths=[...])
-
-Pure function: no agent framing, no MCP, no ExperimentResult. Lens wraps it
-afterward in a thin `run_<name>` function under `lens/mcp_server/src/tools/`.
+Built: diff (per-prompt KL, logit-diff amplification, favoured tokens, and which component's
+weights account for the change). Planned: see `lens/mcp_server/src/tools/model_diffing/README.md`.
 """

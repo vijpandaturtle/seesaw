@@ -165,3 +165,27 @@ def test_hand_entered_inputs_cant_start_a_job(jobs):
     with pytest.raises(TypeError):
         jobs.create("x", kind="pathway", params={"pathway": "circuit_discovery", **IOI})
     assert jobs.list_jobs() == []
+
+
+def test_every_catalogued_pathway_has_a_module_with_run():
+    import importlib
+    import inspect
+
+    for name in catalog.names():
+        params = inspect.signature(importlib.import_module(f"seesaw.pathways.{name}").run).parameters
+        for key in (*catalog.PATHWAYS[name].required, *catalog.PATHWAYS[name].text_inputs):
+            assert key in params, f"{name}.run doesn't take {key}"
+
+
+def test_model_diffing_takes_one_model_name_not_a_list():
+    ok = {"prompts": ["a", "b"], "other_model": "gpt2-medium"}
+    assert catalog.validate("model_diffing", ok) == []
+    assert catalog.validate("model_diffing", {**ok, "other_model": ["gpt2-medium"]})
+    assert catalog.validate("model_diffing", {"prompts": ["a"]})
+    assert '"other_model": "..."' in catalog.scout_brief("model_diffing")
+
+
+def test_fact_inputs_line_up_with_the_prompts():
+    params = {"prompts": ["The Eiffel Tower is in", "Big Ben is in"], "subjects": ["The Eiffel Tower"],
+              "positive_tokens": [" Paris", " London"]}
+    assert any("subjects has 1 entries" in e for e in catalog.validate("factual_recall", params))
