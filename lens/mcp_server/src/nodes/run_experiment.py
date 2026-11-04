@@ -8,6 +8,7 @@ from ..app.sandbox import run_in_sandbox
 from ..config import PLOTS_DIR, SANDBOX_TIMEOUT, SWEEP_TIMEOUT, SWEEP_TOOLS
 from ..models.schemas import ExperimentResult
 from shared.db import events
+from shared.evidence import assess, refusal
 from shared.lens_tools import active_backend
 
 from ..tools import expand_pairings, normalize_tool_kwargs, registry
@@ -48,10 +49,13 @@ def run_experiment(state: dict) -> dict:
         )
 
     tool_fn = registry().get(spec["tool"])
+    too_few = refusal(spec["tool"], len(spec["prompts"]))
     if tool_fn is None:
         result = failure(
             f"Tool '{spec['tool']}' not in the {active_backend()} registry: {list(registry())}"
         )
+    elif too_few:
+        result = failure(too_few)
     elif is_remote() and active_backend() != "seesaw":
         result = failure("The lever backend runs locally only; unset SEESAW_LENS_BACKEND=modal")
     elif is_remote():
@@ -97,8 +101,13 @@ def run_experiment(state: dict) -> dict:
             result.model_name = spec["model_name"]
             result.tool_kwargs = {k: v for k, v in kwargs.items() if k != "output_dir"}
 
+    if result.status == "success":
+        result.evidence = assess(spec["tool"], result.data, len(spec["prompts"]))
+
     icon = "✅" if result.status == "success" else "❌"
     print(f"   {icon} {result.status} | plots={len(result.plot_paths)}")
+    if result.evidence:
+        print(f"   ↳ evidence: {result.evidence['label']}")
     if result.status != "success" and result.error:
         print(f"   ↳ {result.error[:300]}")
     events.emit(
@@ -110,6 +119,7 @@ def run_experiment(state: dict) -> dict:
                  + (f" — {result.error[:200]}" if result.error else "")),
         data={"tool": spec["tool"], "model": spec["model_name"], "prompts": spec["prompts"],
               "tool_kwargs": result.tool_kwargs, "status": result.status,
+              "evidence": result.evidence,
               "error": result.error, "plot_paths": [str(p) for p in result.plot_paths],
               "data": result.data},
     )

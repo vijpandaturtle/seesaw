@@ -18,6 +18,7 @@ import json
 
 import pytest
 
+from shared.evidence import trust
 from shared.lens_tools import BACKENDS, LENS_TOOLS, catalog, names
 
 
@@ -98,6 +99,10 @@ def test_every_tool_runs_through_dispatch(tool, model, tmp_path):
     assert result.tool == tool
     json.dumps(result.data)                                  # goes into the bundle as JSON
     assert all(p.exists() for p in result.plot_paths)
+    # Every control shared/evidence.py looks for has to be a key the tool returns,
+    # or every result would be labelled incomplete.
+    missing = [c.key for c in trust(tool, "seesaw").controls if c.key not in result.data]
+    assert not missing, f"{tool} doesn't return its controls {missing}"
 
 
 def test_pair_prompts_route_to_whichever_name_the_tool_takes():

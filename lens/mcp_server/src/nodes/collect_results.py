@@ -17,6 +17,9 @@ def collect_results(state: dict) -> dict:
         "n_total":           len(state["results"]),
         "n_success":         sum(1 for r in state["results"] if r["status"] == "success"),
         "n_failed":          sum(1 for r in state["results"] if r["status"] != "success"),
+        # Succeeded, but a required control didn't run: not a finding yet.
+        "n_incomplete":      sum(1 for r in state["results"] if r["status"] == "success"
+                                 and not (r.get("evidence") or {}).get("complete", True)),
     }
     output_dir = Path(state.get("output_dir") or OUTPUTS_DIR)
     output_dir.mkdir(parents=True, exist_ok=True)

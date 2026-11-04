@@ -33,7 +33,9 @@ def run_steering_vector(
     Answers: "Does pushing along this direction change the behaviour, and smoothly?"
     """
     if layer is None:
-        layer = _linear_probe.compute(model, prompts, counterfactual_prompts, output_dir).data["best_layer"]
+        # Only the layer is wanted here, so the probe's shuffled-label control is skipped.
+        layer = _linear_probe.compute(
+            model, prompts, counterfactual_prompts, output_dir, n_shuffles=0).data["best_layer"]
     direction = _linear_probe.direction(model, prompts, counterfactual_prompts, layer)
     n = len(counterfactual_prompts)
     result = _steering_vector.compute(
