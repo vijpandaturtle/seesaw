@@ -54,23 +54,9 @@ def tl_load_kwargs(model_name: str) -> dict:
 
 
 # ── GPU (SEESAW_LENS_BACKEND=modal) ───────────────────────────────────────────
-# Models are loaded in float32. An A10G (24 GB) holds them, with room for
-# activation caches, up to about 4B parameters; past that they go to an A100.
-GPU_SMALL: str = os.getenv("SEESAW_GPU_SMALL", "A10G")
-GPU_LARGE: str = os.getenv("SEESAW_GPU_LARGE", "A100-80GB")
-LARGE_MODEL_PARAMS_B: float = 4.0
-
-
-def gpu_for(model_name: str) -> str:
-    """The Modal GPU for `model_name`, by the parameter count in its name ('Qwen2.5-7B' → 7).
-
-    Read from the name rather than the config so routing needs no download
-    (and no token for gated models). Names without a size are small.
-    """
-    import re
-
-    sizes = [float(x) for x in re.findall(r"(?<![\d.])(\d+(?:\.\d+)?)[bB](?![a-zA-Z])", model_name)]
-    return GPU_LARGE if sizes and max(sizes) > LARGE_MODEL_PARAMS_B else GPU_SMALL
+# Which GPU a model runs on lives in shared/gpus.py, torch-free, so job cost
+# estimates price the same GPU the run uses.
+from shared.gpus import GPU_LARGE, GPU_SMALL, LARGE_MODEL_PARAMS_B, gpu_for  # noqa: E402,F401
 
 # ── Sandbox ───────────────────────────────────────────────────────────────────
 SANDBOX_TIMEOUT: int = int(os.getenv("SEESAW_SANDBOX_TIMEOUT", "300"))   # seconds — ablation/patching can be slow on CPU
