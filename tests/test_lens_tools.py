@@ -75,7 +75,7 @@ PLAN_KWARGS = {
 }
 # Need a published SAE for the model, or Neuronpedia's graph service.
 EXTERNAL_TOOLS = {"feature_search", "feature_attribution", "feature_clamping", "circuit_tracing",
-                  "feature_lookup"}
+                  "feature_lookup", "feature_steering"}
 
 
 @pytest.mark.parametrize("backend", BACKENDS)
@@ -83,11 +83,21 @@ def test_catalog_matches_registry(backend):
     assert list(catalog(backend)) == list(registry(backend))
 
 
-@pytest.fixture(scope="module")
-def model():
+# Two architectures: GPT-2's (learned positions, LayerNorm, one KV head per
+# head), and the one Gemma-2, Llama-3.2 and Qwen2.5 share (rotary positions,
+# RMSNorm, gated MLP, grouped-query attention with two query heads per KV head).
+ARCHITECTURES = {
+    "gpt2-style": dict(act_fn="gelu", normalization_type="LN"),
+    "llama-style": dict(act_fn="silu", normalization_type="RMS", gated_mlp=True, n_key_value_heads=2,
+                        positional_embedding_type="rotary", rotary_dim=8),
+}
+
+
+@pytest.fixture(scope="module", params=list(ARCHITECTURES))
+def model(request):
     cfg = HookedTransformerConfig(
         n_layers=2, d_model=32, d_head=8, n_heads=4, d_mlp=64, n_ctx=64,
-        act_fn="gelu", tokenizer_name="gpt2", normalization_type="LN", seed=0)
+        tokenizer_name="gpt2", seed=0, **ARCHITECTURES[request.param])
     return HookedTransformer(cfg).eval()
 
 

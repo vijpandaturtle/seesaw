@@ -147,6 +147,14 @@ TRUST: dict[Backend, dict[str, Trust]] = {
         "rome_edits": Trust(caveat=(
             "The key covariance comes from a short built-in corpus, so specificity is rougher than "
             "published ROME numbers.")),
+        "patchscope": Trust(caveat=(
+            "The model is asked to repeat a patched state; it reads what that state encodes, not "
+            "what the original prompt used it for.")),
+        "kv_head_patching": Trust(caveat=f"{_PATCHING} {_ALONE}"),
+        "feature_steering": Trust(controls=(
+            Control("random_abs_slope", "random directions pushed the same way"),
+            Control("control_loss_after", "language-modelling loss with the strongest push"),
+        ), caveat="A large push can move the output by damaging the model; compare the loss."),
         "model_diff": Trust(caveat=(
             "Covers only these prompts: a change that shows up on other inputs won't appear here.")),
     },

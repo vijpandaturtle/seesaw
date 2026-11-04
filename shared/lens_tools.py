@@ -42,6 +42,9 @@ LENS_TOOLS: dict[str, LensTool] = {
                        "does the model do the task at all?"),
     "logit_lens": LensTool(
         "descriptive", "project the residual stream at each layer to vocabulary: where the prediction forms"),
+    "patchscope": LensTool(
+        "descriptive", "decode each layer's last-token hidden state by patching it into an identity prompt, beside "
+                       "the logit lens: where the answer is encoded, read by the model itself"),
     "attention_pattern": LensTool(
         "descriptive", "attention weights per head per layer: what each head looks at"),
     "direct_logit_attribution": LensTool(
@@ -82,6 +85,9 @@ LENS_TOOLS: dict[str, LensTool] = {
         "causal", "patch named heads from clean into corrupted, each alone and all together"),
     "mlp_patching": LensTool(
         "causal", "patch each MLP layer's output from clean into corrupted, one layer at a time"),
+    "kv_head_patching": LensTool(
+        "causal", "patch each key/value head's keys, values and both from clean into corrupted; in grouped-query "
+                  "models (Llama, Qwen, Gemma) a KV head serves a group of query heads"),
     "circuit_evaluation": LensTool(
         "causal", "how much behaviour a set of heads keeps (faithfulness) and removes (necessity), vs random "
                   "head sets"),
@@ -96,6 +102,9 @@ LENS_TOOLS: dict[str, LensTool] = {
     "feature_clamping": LensTool(
         "causal", "switch named SAE features off (or set them to a value) and measure the logit diff, vs random "
                   "features"),
+    "feature_steering": LensTool(
+        "causal", "push the residual stream along one SAE `feature`'s decoder direction at its layer and sweep "
+                  "the strength, vs random directions, with a loss check"),
     "leace_erasure": LensTool(
         "causal", "erase what separates prompts from counterfactual_prompts (LEACE, every residual site, fitted on "
                   "held-out pairs): does the attribute's pull go, and does the task survive? vs random erasers"),
@@ -138,12 +147,20 @@ LEVER_TOOLS: dict[str, LensTool] = {
 
 _CATALOGS: dict[str, dict[str, LensTool]] = {"seesaw": LENS_TOOLS, "lever": LEVER_TOOLS}
 
+# The model a job targets when none is named: the one every tool covers,
+# feature_explain and circuit_tracing included (Gemma Scope SAEs, Neuronpedia
+# graphs). Gated on Hugging Face, so the GPU app needs an HF token.
+DEFAULT_MODEL = "google/gemma-2-2b"
+
 # What Scout and Lens's planner are told about models and inputs, per backend.
 PLANNING_NOTES: dict[str, str] = {
     "seesaw": (
-        "Experiments run with TransformerLens on small text models. Prefer GPT-2 Small and Pythia "
-        "(fast, well-studied); SAE tools need a model Neuronpedia hosts SAEs for (e.g. gpt2-small), and "
-        "circuit_tracing reads gemma-2-2b graphs."
+        "Experiments run with TransformerLens on Modal GPUs. Target google/gemma-2-2b (the default: "
+        "every tool works on it), meta-llama/Llama-3.2-1B or -3B, or Qwen/Qwen2.5-0.5B to -7B. The SAE "
+        "tools need published SAEs: Gemma-2-2B (Gemma Scope, every layer) and Qwen/Qwen2.5-7B-Instruct "
+        "(every 4th layer) only. circuit_tracing reads Neuronpedia graphs for gemma-2-2b and the models "
+        "it lists. Llama, Qwen and Gemma use grouped-query attention: heads in a group share keys and "
+        "values, so use kv_head_patching for keys and values."
     ),
     "lever": (
         "Experiments run through lever on vision-language models, as Hugging Face checkpoints: "
@@ -164,8 +181,9 @@ TOOL_CHAINS: dict[str, str] = {
         "attribution_patching or direct_logit_attribution -> head_patching or ablation with `heads` -> "
         "circuit_evaluation; edge_attribution_patching -> path_patching; counterfactual -> linear_probe -> "
         "directional_ablation or steering_vector or leace_erasure; feature_attribution -> feature_clamping, "
-        "feature_lookup; answer_scores -> causal_tracing -> rome_edits for facts; linear_probe -> probe_transfer; "
-        "attribution_patching -> mlp_patching for MLPs. "
+        "feature_lookup, feature_steering; answer_scores -> causal_tracing -> rome_edits for facts; linear_probe -> probe_transfer; "
+        "attribution_patching -> mlp_patching for MLPs; head_patching -> kv_head_patching on grouped-query models; "
+        "logit_lens -> patchscope where the logit lens reads nothing. "
         "circuit_tracing reads attribution graphs from Neuronpedia for gemma-2-2b only."
     ),
     "lever": (

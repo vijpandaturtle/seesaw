@@ -85,8 +85,16 @@ def test_unexpected_inputs_are_refused():
 
 
 def test_feature_explain_needs_its_sae_model():
-    assert catalog.validate("feature_explain", IOI, model="pythia-70m")
-    assert catalog.validate("feature_explain", IOI, model="gpt2") == []
+    assert catalog.validate("feature_explain", IOI, model="meta-llama/Llama-3.2-1B")
+    assert catalog.validate("feature_explain", IOI, model="Qwen/Qwen2.5-1.5B")
+    assert catalog.validate("feature_explain", IOI, model="google/gemma-2-2b") == []
+    assert catalog.validate("feature_explain", IOI, model="Qwen/Qwen2.5-7B-Instruct") == []
+
+
+def test_feature_explain_sweeps_the_layers_its_model_has_saes_for():
+    assert catalog.sae_layers("google/gemma-2-2b") == [8, 12, 16, 19]
+    # Qwen2.5-7B-Instruct's SAEs are every 4th layer, so the sweep snaps to them.
+    assert set(catalog.sae_layers("Qwen/Qwen2.5-7B-Instruct")) <= {3, 7, 11, 15, 19, 23, 27}
 
 
 # ── worker ───────────────────────────────────────────────────────────────────
@@ -178,9 +186,9 @@ def test_every_catalogued_pathway_has_a_module_with_run():
 
 
 def test_model_diffing_takes_one_model_name_not_a_list():
-    ok = {"prompts": ["a", "b"], "other_model": "gpt2-medium"}
+    ok = {"prompts": ["a", "b"], "other_model": "Qwen/Qwen2.5-1.5B"}
     assert catalog.validate("model_diffing", ok) == []
-    assert catalog.validate("model_diffing", {**ok, "other_model": ["gpt2-medium"]})
+    assert catalog.validate("model_diffing", {**ok, "other_model": ["Qwen/Qwen2.5-1.5B"]})
     assert catalog.validate("model_diffing", {"prompts": ["a"]})
     assert '"other_model": "..."' in catalog.scout_brief("model_diffing")
 

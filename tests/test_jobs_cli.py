@@ -51,7 +51,7 @@ def seesaw(monkeypatch, *argv) -> int:
 def test_submit_queues_a_job_and_starts_a_local_worker(jobs, launched, monkeypatch, capsys):
     assert seesaw(monkeypatch, "jobs", "submit", "which heads do IOI?", "--runner", "local") == 0
     [job] = jobs.list_jobs()
-    assert (job.status, job.stage, job.model) == (jobs.QUEUED, "scout", "gpt2")
+    assert (job.status, job.stage, job.model) == (jobs.QUEUED, "scout", jobs.DEFAULT_MODEL)
     [(cmd, kw)] = launched
     assert cmd[-3:] == ["-m", "orchestrator.src.worker", job.id]
     assert kw["start_new_session"] and kw["cwd"] == jobs.REPO_ROOT

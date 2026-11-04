@@ -38,6 +38,8 @@ import os
 import subprocess
 import sys
 import time
+
+from shared.lens_tools import DEFAULT_MODEL
 import urllib.request
 import webbrowser
 from dataclasses import asdict
@@ -367,7 +369,7 @@ def add_parser(sub) -> None:
                         "that one, Scout chooses its inputs; none: no pathway, Scout plans freely")
     p.add_argument("--search", action="store_true",
                    help="let Scout search arXiv and the web while planning (off by default)")
-    p.add_argument("--model", default="gpt2", help="model Lens should target (default: gpt2)")
+    p.add_argument("--model", default=DEFAULT_MODEL, help=f"model Lens should target (default: {DEFAULT_MODEL})")
     p.add_argument("--auto-approve", action="store_true", help="run all stages without approval gates")
     runner_arg(p)
     follow_arg(p)

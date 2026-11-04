@@ -1,4 +1,5 @@
-"""Agent-facing wrappers over the SAE feature tools: feature_search, feature_attribution, feature_clamping, feature_lookup.
+"""Agent-facing wrappers over the SAE feature tools: feature_search, feature_attribution, feature_clamping,
+feature_steering, feature_lookup.
 
 The agent names a layer; the SAE comes from SAELens's directory
 (seesaw.interp.feature_extraction.sae.find_sae), preferring the release
@@ -16,6 +17,7 @@ from seesaw.interp.feature_extraction import feature_search as _feature_search
 from seesaw.interp.feature_extraction import neuronpedia as _neuronpedia
 from seesaw.interp.feature_extraction.sae import find_sae, load_sae
 from seesaw.interp.steering import feature_clamping as _feature_clamping
+from seesaw.interp.steering import feature_steering as _feature_steering
 
 from ..config import PLOTS_DIR
 from ..models.schemas import ExperimentResult
@@ -104,6 +106,30 @@ def run_feature_clamping(
                                        [int(f) for f in features], output_dir, value=value)
     result.data["layer"] = layer
     return wrap(result, f"Feature Clamping (layer {layer})", "feature_clamping", model, prompts)
+
+
+def run_feature_steering(
+    model: HookedTransformer,
+    prompts: list[str],
+    positive_tokens: list[str],
+    negative_tokens: list[str],
+    feature: int,
+    layer: int | None = None,
+    output_dir: Path = PLOTS_DIR,
+) -> ExperimentResult:
+    """Push the residual stream along one SAE feature's decoder direction, sweeping its strength.
+
+    Strength is in multiples of the residual's own size; compared with random
+    directions pushed the same way, with a loss check. `layer` must be the one
+    the feature index came from.
+    Answers: "Is turning this feature up enough to change the output?"
+    """
+    layer, sae = _load(model, layer)
+    result = _feature_steering.compute(model, sae, prompts, positive_tokens, negative_tokens,
+                                       int(feature), output_dir)
+    result.data["layer"] = layer
+    return wrap(result, f"Feature Steering (#{int(feature)}, layer {layer})", "feature_steering",
+                model, prompts)
 
 
 def run_feature_lookup(

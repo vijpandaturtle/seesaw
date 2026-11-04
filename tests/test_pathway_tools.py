@@ -48,16 +48,24 @@ SUBJECTS = ["The Eiffel Tower", "The Colosseum"]
 ANSWERS, NEW = [" Paris", " Rome"], [" London", " Berlin"]
 
 
-def _tiny(seed: int = 0) -> HookedTransformer:
+# GPT-2's architecture, and the one Gemma-2, Llama-3.2 and Qwen2.5 share.
+ARCHITECTURES = {
+    "gpt2-style": dict(act_fn="gelu", normalization_type="LN"),
+    "llama-style": dict(act_fn="silu", normalization_type="RMS", gated_mlp=True, n_key_value_heads=2,
+                        positional_embedding_type="rotary", rotary_dim=8),
+}
+
+
+def _tiny(seed: int = 0, arch: str = "gpt2-style") -> HookedTransformer:
     cfg = HookedTransformerConfig(
         n_layers=2, d_model=32, d_head=8, n_heads=4, d_mlp=64, n_ctx=64,
-        act_fn="gelu", tokenizer_name="gpt2", normalization_type="LN", seed=seed)
+        tokenizer_name="gpt2", seed=seed, **ARCHITECTURES[arch])
     return HookedTransformer(cfg).eval()
 
 
-@pytest.fixture(scope="module")
-def model():
-    return _tiny()
+@pytest.fixture(scope="module", params=list(ARCHITECTURES))
+def model(request):
+    return _tiny(arch=request.param)
 
 
 @pytest.fixture(autouse=True)
@@ -188,7 +196,7 @@ class _IdentitySAE:
 def via_modal(model, tmp_path, monkeypatch):
     """Route by-name steps through a fake of LensRunner.run_experiment, running on `model`."""
     monkeypatch.setenv("SEESAW_LENS_BACKEND", "modal")
-    other = _tiny(seed=1)
+    other = _tiny(seed=1, arch="llama-style" if model.cfg.gated_mlp else "gpt2-style")
     specs = []
 
     def run_remote(spec, output_dir):

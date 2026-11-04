@@ -47,6 +47,8 @@ import uuid
 from dataclasses import dataclass
 from pathlib import Path
 
+from shared.lens_tools import DEFAULT_MODEL
+
 REPO_ROOT   = Path(__file__).resolve().parents[2]
 OUTPUTS_DIR = REPO_ROOT / "outputs"
 LOGS_DIR    = OUTPUTS_DIR / "job_logs"
@@ -353,7 +355,7 @@ def connect():
 
 
 # ── CRUD ─────────────────────────────────────────────────────────────────────
-def create(question: str, model: str = "gpt2", auto_approve: bool = False,
+def create(question: str, model: str = DEFAULT_MODEL, auto_approve: bool = False,
            params: dict | None = None) -> Job:
     """Insert a new job, queued at Scout.
 
@@ -383,8 +385,8 @@ def create(question: str, model: str = "gpt2", auto_approve: bool = False,
         if name is not None and name != catalog.AUTO and name not in catalog.names():
             raise ValueError(f"unknown pathway {name!r}; expected one of "
                              f"{[catalog.AUTO, *catalog.names()]}")
-        if name == "feature_explain" and model not in catalog.SAE_MODELS:
-            raise ValueError(f"feature_explain only runs on gpt2, not {model!r}")
+        if name == "feature_explain" and not catalog.has_saes(model):
+            raise ValueError(catalog._no_saes(model))
         if "search" in params and not isinstance(params["search"], bool):
             raise ValueError("search must be true or false")
         params = {k: v for k, v in params.items() if v is not None}

@@ -15,10 +15,15 @@ import os
 from pathlib import Path
 
 from ..config import PLOTS_DIR
+from ..config.settings import gpu_for
 from ..models.schemas import ExperimentResult
 
-MODAL_APP = os.environ.get("SEESAW_MODAL_APP", "seesaw-lens")
 MODAL_CLS = "LensRunner"
+
+
+def app_name() -> str:
+    """SEESAW_MODAL_APP, read per call so a test run can point at seesaw-lens-dev."""
+    return os.environ.get("SEESAW_MODAL_APP") or "seesaw-lens"
 
 
 def backend() -> str:
@@ -49,7 +54,9 @@ def run_experiment_remote(spec: dict, output_dir: Path = PLOTS_DIR) -> Experimen
                              "isn't installed (pip install modal)")
 
     try:
-        runner_cls = modal.Cls.from_name(MODAL_APP, MODAL_CLS)
+        # One runner class; the GPU is chosen per call by the model's size.
+        runner_cls = modal.Cls.from_name(app_name(), MODAL_CLS).with_options(
+            gpu=gpu_for(spec.get("model_name", "")))
         payload = runner_cls().run_experiment.remote(spec)
     except Exception as exc:                        # noqa: BLE001 — reported as a result
         return _failed(spec, f"remote call failed: {type(exc).__name__}: {exc}")

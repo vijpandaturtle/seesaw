@@ -28,6 +28,8 @@ from functools import lru_cache
 from pathlib import Path
 from typing import NamedTuple
 
+from shared.lens_tools import DEFAULT_MODEL
+
 
 class Pathway(NamedTuple):
     summary: str
@@ -90,8 +92,8 @@ PATHWAYS: dict[str, Pathway] = {
         text_inputs=("other_model",),
     ),
     "feature_explain": Pathway(
-        "which SAE features drive this output, and what are they? sweeps GPT-2 small SAEs at several "
-        "layers (gpt2 only)",
+        "which SAE features drive this output, and what are they? sweeps published residual SAEs at "
+        "several depths (gemma-2-2b, or Qwen2.5-7B-Instruct; no published SAEs for other models)",
         required=("prompts", "positive_tokens", "negative_tokens"),
         version="2",
     ),
@@ -134,20 +136,54 @@ INPUTS: dict[str, str] = {
                    "name with the same tokenizer (one string, not a list)",
 }
 
-# feature_explain's SAEs: GPT-2 small residual SAEs at four layers, swept.
-# Layer 8 is the one the known-answer test uses. The feature tools load the
-# SAE for each layer (find_sae picks SAE_RELEASE for GPT-2 small).
-SAE_RELEASE = "gpt2-small-res-jb"
-SAE_LAYERS = (4, 6, 8, 10)
-SAE_IDS = tuple(f"blocks.{layer}.hook_resid_pre" for layer in SAE_LAYERS)
-SAE_MODELS = ("gpt2", "gpt2-small")
+class FeatureSAEs(NamedTuple):
+    """The published residual SAEs feature_explain reads for one model."""
+    release: str                 # SAELens release (the feature tools pick it by model and layer)
+    layers: tuple[int, ...]      # layers it has an SAE for
+
+
+# feature_explain needs published SAEs, and only these models have them (with
+# Neuronpedia labels). Llama-3.2 and the other Qwen2.5 sizes have none, so the
+# pathway refuses them rather than run on SAEs nobody has checked.
+FEATURE_SAES: dict[str, FeatureSAEs] = {
+    "gemma-2-2b": FeatureSAEs("gemma-scope-2b-pt-res-canonical", tuple(range(26))),
+    "Qwen2.5-7B-Instruct": FeatureSAEs("qwen2.5-7b-instruct-andyrdt", (3, 7, 11, 15, 19, 23, 27)),
+}
+# The depths feature_explain sweeps, as fractions of the model's layers: past
+# token-level features, before the final layers that mostly map to vocabulary.
+SAE_DEPTHS = (0.3, 0.45, 0.6, 0.75)
+
+
+def _short(model: str) -> str:
+    """'google/gemma-2-2b' → 'gemma-2-2b': the name TransformerLens records."""
+    return model.split("/", 1)[-1]
+
+
+def feature_models() -> list[str]:
+    return list(FEATURE_SAES)
+
+
+def has_saes(model: str) -> bool:
+    return _short(model) in FEATURE_SAES
+
+
+def sae_layers(model: str) -> list[int]:
+    """The layers feature_explain sweeps on `model`: each depth's nearest layer with an SAE."""
+    saes = FEATURE_SAES[_short(model)]
+    n = max(saes.layers) + 1
+    return sorted({min(saes.layers, key=lambda l: abs(l - d * n)) for d in SAE_DEPTHS})
+
+
+def _no_saes(model: str) -> str:
+    return (f"feature_explain needs published SAEs, which only {feature_models()} have; "
+            f"not {model!r}")
 
 
 def names() -> list[str]:
     return list(PATHWAYS)
 
 
-def validate(name: str, params: dict, model: str = "gpt2") -> list[str]:
+def validate(name: str, params: dict, model: str = DEFAULT_MODEL) -> list[str]:
     """Everything wrong with these inputs, or [] when the job can run."""
     pathway = PATHWAYS.get(name)
     if pathway is None:
@@ -178,12 +214,12 @@ def validate(name: str, params: dict, model: str = "gpt2") -> list[str]:
             if _is_str_list(value) and value and len(value) != len(prompts):
                 errors.append(f"{key} has {len(value)} entries but prompts has {len(prompts)}")
 
-    if name == "feature_explain" and model not in SAE_MODELS:
-        errors.append(f"feature_explain only runs on gpt2 (its SAE is {SAE_RELEASE}), not {model!r}")
+    if name == "feature_explain" and not has_saes(model):
+        errors.append(_no_saes(model))
     return errors
 
 
-def check_inputs(name: str, params: dict, model: str = "gpt2") -> list[str]:
+def check_inputs(name: str, params: dict, model: str = DEFAULT_MODEL) -> list[str]:
     """Everything stopping these inputs running on this model, tokenizer included."""
     return validate(name, params, model) or token_errors(params, model)
 
@@ -212,7 +248,7 @@ def _input_rules(model: str) -> list[str]:
     ]
 
 
-def choice_brief(model: str = "gpt2") -> str:
+def choice_brief(model: str = DEFAULT_MODEL) -> str:
     """Tell Scout it may choose one of the pathways for this job, or none.
 
     Scout writes its choice as one fenced json block: {"pathway": name or
@@ -231,7 +267,7 @@ def choice_brief(model: str = "gpt2") -> str:
     for name, pathway in PATHWAYS.items():
         if name == "attribute_audit":
             continue                  # an older name for concept_direction
-        if name == "feature_explain" and model not in SAE_MODELS:
+        if name == "feature_explain" and not has_saes(model):
             continue
         needs = ", ".join(f"`{k}`" for k in pathway.required)
         needs += "".join(f", `{k}` (one string)" for k in pathway.text_inputs)
@@ -257,7 +293,7 @@ def choice_brief(model: str = "gpt2") -> str:
     return "\n".join(lines)
 
 
-def scout_brief(name: str, model: str = "gpt2") -> str:
+def scout_brief(name: str, model: str = DEFAULT_MODEL) -> str:
     """Tell Scout which pathway will run and what it has to choose.
 
     The pathway is fixed: Scout's job is only to pick its inputs, written as
@@ -283,7 +319,7 @@ def scout_brief(name: str, model: str = "gpt2") -> str:
     if pathway.text_inputs:
         lines.append("- " + ", ".join(f"`{k}`" for k in pathway.text_inputs) + " is a single string, not a list.")
     if name == "feature_explain":
-        lines.append(f"- This pathway only runs on gpt2 (its SAE is {SAE_RELEASE}).")
+        lines.append(f"- This pathway only runs on {feature_models()} (the models with published SAEs).")
     lines += [
         "",
         "Put the inputs in the plan you save, as exactly one fenced ```json block of the form:",
@@ -315,7 +351,7 @@ def _pathway_blocks(plan_text: str) -> tuple[list[dict], list[str]]:
     return blocks, []
 
 
-def extract_choice(plan_text: str, model: str = "gpt2") -> tuple[str | None, dict | None, str, list[str]]:
+def extract_choice(plan_text: str, model: str = DEFAULT_MODEL) -> tuple[str | None, dict | None, str, list[str]]:
     """Read the pathway Scout chose (or declined) under AUTO, with its inputs, and check them.
 
     Returns:
@@ -342,7 +378,7 @@ def extract_choice(plan_text: str, model: str = "gpt2") -> tuple[str | None, dic
     return (None, None, "", errors) if errors else (name, block["params"], why, [])
 
 
-def extract_inputs(name: str, plan_text: str, model: str = "gpt2") -> tuple[dict | None, list[str]]:
+def extract_inputs(name: str, plan_text: str, model: str = DEFAULT_MODEL) -> tuple[dict | None, list[str]]:
     """Read the pathway inputs Scout wrote into its plan, and check them.
 
     Returns:
@@ -439,7 +475,7 @@ def run_from_params(name: str, model_name: str, params: dict, output_dir: Path):
     module = importlib.import_module(f"seesaw.pathways.{name}")
     kwargs = {k: v for k, v in params.items() if v}
     if name == "feature_explain":
-        return module.run(model_name, list(SAE_LAYERS), output_dir=output_dir, **kwargs)
+        return module.run(model_name, sae_layers(model_name), output_dir=output_dir, **kwargs)
     return module.run(model_name, output_dir=output_dir, **kwargs)
 
 

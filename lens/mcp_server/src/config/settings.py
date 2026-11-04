@@ -35,6 +35,43 @@ TL_FOLD_LN: bool = True
 TL_REFACTOR_FACTORED_ATTN: bool = True
 # Note: do NOT set use_attn_result=True — incompatible with refactor_factored_attn_matrices
 
+
+def tl_load_kwargs(model_name: str) -> dict:
+    """HookedTransformer.from_pretrained settings for `model_name`, the same wherever Lens loads it.
+
+    The QK refactor is skipped for rotary models (Llama, Qwen, Gemma, Pythia):
+    there the QK matrix depends on position, and TransformerLens refuses it.
+    """
+    from transformer_lens.loading_from_pretrained import get_pretrained_model_config
+
+    rotary = get_pretrained_model_config(model_name).positional_embedding_type == "rotary"
+    return {
+        "center_writing_weights": TL_CENTER_WRITING_WEIGHTS,
+        "center_unembed": TL_CENTER_UNEMBED,
+        "fold_ln": TL_FOLD_LN,
+        "refactor_factored_attn_matrices": TL_REFACTOR_FACTORED_ATTN and not rotary,
+    }
+
+
+# ── GPU (SEESAW_LENS_BACKEND=modal) ───────────────────────────────────────────
+# Models are loaded in float32. An A10G (24 GB) holds them, with room for
+# activation caches, up to about 4B parameters; past that they go to an A100.
+GPU_SMALL: str = os.getenv("SEESAW_GPU_SMALL", "A10G")
+GPU_LARGE: str = os.getenv("SEESAW_GPU_LARGE", "A100-80GB")
+LARGE_MODEL_PARAMS_B: float = 4.0
+
+
+def gpu_for(model_name: str) -> str:
+    """The Modal GPU for `model_name`, by the parameter count in its name ('Qwen2.5-7B' → 7).
+
+    Read from the name rather than the config so routing needs no download
+    (and no token for gated models). Names without a size are small.
+    """
+    import re
+
+    sizes = [float(x) for x in re.findall(r"(?<![\d.])(\d+(?:\.\d+)?)[bB](?![a-zA-Z])", model_name)]
+    return GPU_LARGE if sizes and max(sizes) > LARGE_MODEL_PARAMS_B else GPU_SMALL
+
 # ── Sandbox ───────────────────────────────────────────────────────────────────
 SANDBOX_TIMEOUT: int = int(os.getenv("SEESAW_SANDBOX_TIMEOUT", "300"))   # seconds — ablation/patching can be slow on CPU
 # Tools that re-run the model once per layer for every prompt. On a VLM with

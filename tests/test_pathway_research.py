@@ -28,6 +28,7 @@ from pathlib import Path
 import pytest
 
 from seesaw.pathways import catalog
+from shared.lens_tools import DEFAULT_MODEL
 from seesaw.pathways.result import PathwayResult
 
 IOI = {
@@ -128,10 +129,10 @@ def lens(monkeypatch):
         seen["replays"].append(replay)
         if seen["fail"]:
             raise RuntimeError("Lens fell over")
-        bundle = {"research_question": "IOI", "model_name": "gpt2", "n_total": 1,
+        bundle = {"research_question": "IOI", "model_name": DEFAULT_MODEL, "n_total": 1,
                   "n_success": 1, "n_failed": 0,
                   "results": [{"name": "logit_lens_ioi", "tool": "logit_lens",
-                               "model_name": "gpt2", "prompts": IOI["prompts"],
+                               "model_name": DEFAULT_MODEL, "prompts": IOI["prompts"],
                                "summary": "answer appears at layer 9", "status": "success"}]}
         path = output_dir / "results_bundle.json"
         path.write_text(json.dumps(bundle))
@@ -161,8 +162,8 @@ def test_a_research_job_may_name_a_pathway_ask_for_one_or_turn_on_search(jobs):
         "pathway": "auto", "search": True}
     with pytest.raises(ValueError, match="search must be"):
         jobs.create("IOI", params={"search": "yes"})
-    with pytest.raises(ValueError, match="only runs on gpt2"):
-        jobs.create("IOI", model="pythia-70m", params={"pathway": "feature_explain"})
+    with pytest.raises(ValueError, match="needs published SAEs"):
+        jobs.create("IOI", model="meta-llama/Llama-3.2-1B", params={"pathway": "feature_explain"})
 
 
 # ── Scout ────────────────────────────────────────────────────────────────────
@@ -224,7 +225,7 @@ def test_inputs_still_invalid_after_two_revisions_fail_the_stage(jobs, scout):
 
 
 def test_a_block_for_the_wrong_pathway_is_refused():
-    params, errors = catalog.extract_inputs("attribute_audit", plan(IOI), "gpt2")
+    params, errors = catalog.extract_inputs("attribute_audit", plan(IOI), DEFAULT_MODEL)
     assert params is None
     assert "this job runs 'attribute_audit'" in errors[0]
 
@@ -318,7 +319,7 @@ def test_a_rerun_runs_the_pathway_again_on_the_same_inputs(jobs, scout, pathway_
     source = jobs.get(job_id)
 
     again = jobs.rerun(job_id)
-    assert (again.stage, again.status, again.model) == ("lens", jobs.QUEUED, "gpt2")
+    assert (again.stage, again.status, again.model) == ("lens", jobs.QUEUED, DEFAULT_MODEL)
     assert again.plan_path == source.plan_path
     assert again.params_dict == {"pathway": "circuit_discovery", "pathway_params": IOI,
                                  "rerun_of": job_id}
@@ -333,14 +334,14 @@ def test_a_rerun_runs_the_pathway_again_on_the_same_inputs(jobs, scout, pathway_
 
 def test_a_rerun_can_move_the_inputs_to_another_model(jobs, scout, pathway_runs, lens):
     job_id = scouted(jobs, scout)
-    again = jobs.rerun(job_id, model="pythia-70m")
-    assert again.model == "pythia-70m"
+    again = jobs.rerun(job_id, model="meta-llama/Llama-3.2-1B")
+    assert again.model == "meta-llama/Llama-3.2-1B"
 
     code, after = run_stage(jobs, again.id)
     assert code == 0
     saved = json.loads((jobs.job_dir(again.id) / "pathway" / "result.json").read_text())
-    assert saved["model"] == "pythia-70m" and saved["params"] == IOI
-    assert "**Target Model (required, overrides any other model mentioned above)**: pythia-70m" \
+    assert saved["model"] == "meta-llama/Llama-3.2-1B" and saved["params"] == IOI
+    assert "**Target Model (required, overrides any other model mentioned above)**: meta-llama/Llama-3.2-1B" \
         in lens["plans"][-1]
 
 
@@ -357,14 +358,14 @@ def test_inputs_that_dont_fit_the_new_model_are_refused(jobs, scout, monkeypatch
             return ["a", "b"]
 
     monkeypatch.setattr(catalog, "_tokenizer",
-                        lambda model: Splits() if model == "pythia-70m" else FakeTokenizer())
-    with pytest.raises(ValueError, match="can't run on pythia-70m.*' Mary' is 2 tokens"):
-        jobs.rerun(job_id, model="pythia-70m")
+                        lambda model: Splits() if model == "meta-llama/Llama-3.2-1B" else FakeTokenizer())
+    with pytest.raises(ValueError, match="can't run on meta-llama/Llama-3.2-1B.*' Mary' is 2 tokens"):
+        jobs.rerun(job_id, model="meta-llama/Llama-3.2-1B")
 
     params = {**jobs.get(job_id).params_dict, "pathway": "feature_explain"}
     jobs.update(job_id, params=json.dumps(params))
-    with pytest.raises(ValueError, match="feature_explain only runs on gpt2"):
-        jobs.rerun(job_id, model="gpt2-medium")
+    with pytest.raises(ValueError, match="needs published SAEs"):
+        jobs.rerun(job_id, model="Qwen/Qwen2.5-1.5B")
 
 
 def test_a_rerun_rechecks_inputs_that_reach_lens_on_another_model(jobs, scout, pathway_runs,
@@ -372,12 +373,12 @@ def test_a_rerun_rechecks_inputs_that_reach_lens_on_another_model(jobs, scout, p
     # The dashboard queues a rerun without the tokenizer; Lens checks it.
     job_id = scouted(jobs, scout)
     again = jobs.rerun(job_id)
-    jobs.update(again.id, model="gpt2-medium",
+    jobs.update(again.id, model="Qwen/Qwen2.5-1.5B",
                 params=json.dumps({**again.params_dict, "pathway": "feature_explain"}))
 
     code, after = run_stage(jobs, again.id)
     assert code == 1
-    assert "the approved feature_explain inputs can't run on gpt2-medium" in after.error
+    assert "the approved feature_explain inputs can't run on Qwen/Qwen2.5-1.5B" in after.error
     assert pathway_runs == []
 
 
@@ -397,14 +398,14 @@ def test_a_rerun_replays_the_source_jobs_experiments(jobs, scout, pathway_runs, 
     run_stage(jobs, job_id)
     assert lens["replays"] == [None]                 # the source read its plan
 
-    again = jobs.rerun(job_id, model="pythia-70m")
+    again = jobs.rerun(job_id, model="meta-llama/Llama-3.2-1B")
     code, after = run_stage(jobs, again.id)
     assert code == 0
     replay = lens["replays"][-1]
-    assert (replay["research_question"], replay["model_name"]) == ("IOI", "pythia-70m")
+    assert (replay["research_question"], replay["model_name"]) == ("IOI", "meta-llama/Llama-3.2-1B")
     # The extra, as it ran, on the rerun's model; the pathway entry isn't replayed.
     assert replay["experiments"] == [{"name": "logit_lens_ioi", "tool": "logit_lens",
-                                      "model_name": "pythia-70m", "prompts": IOI["prompts"],
+                                      "model_name": "meta-llama/Llama-3.2-1B", "prompts": IOI["prompts"],
                                       "tool_kwargs": {}}]
     bundle = json.loads(open(after.bundle_path).read())
     assert bundle["replayed_from"] == job_id
@@ -497,8 +498,8 @@ def test_search_is_off_unless_the_job_asks_for_it(jobs, scout):
 
 
 def test_the_choice_brief_lists_each_pathway_with_its_inputs():
-    brief = catalog.choice_brief("gpt2")
+    brief = catalog.choice_brief(DEFAULT_MODEL)
     for name in ("circuit_discovery", "concept_direction", "model_diffing", "feature_explain"):
         assert f"`{name}`" in brief
     assert "`other_model` (one string)" in brief
-    assert "`feature_explain`" not in catalog.choice_brief("pythia-70m")   # its SAE is gpt2's
+    assert "`feature_explain`" not in catalog.choice_brief("meta-llama/Llama-3.2-1B")   # no published SAEs

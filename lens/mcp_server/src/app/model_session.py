@@ -1,12 +1,7 @@
 from torch import nn
 from transformer_lens import HookedTransformer
 
-from ..config import (
-    TL_CENTER_WRITING_WEIGHTS,
-    TL_CENTER_UNEMBED,
-    TL_FOLD_LN,
-    TL_REFACTOR_FACTORED_ATTN,
-)
+from ..config.settings import tl_load_kwargs
 
 from shared.lens_tools import active_backend
 
@@ -76,13 +71,7 @@ def get_model(model_name: str):
         print(f"✅ {model_name} — {type(_MODEL_CACHE[key]).__name__}")
         return _MODEL_CACHE[key]
     print(f"⏳ Loading {model_name}...")
-    model = HookedTransformer.from_pretrained(
-        model_name,
-        center_writing_weights=TL_CENTER_WRITING_WEIGHTS,
-        center_unembed=TL_CENTER_UNEMBED,
-        fold_ln=TL_FOLD_LN,
-        refactor_factored_attn_matrices=TL_REFACTOR_FACTORED_ATTN,
-    )
+    model = HookedTransformer.from_pretrained(model_name, **tl_load_kwargs(model_name))
     model.eval()
     _MODEL_CACHE[key] = model
     print(
