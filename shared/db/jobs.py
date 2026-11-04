@@ -90,7 +90,7 @@ ACTIVE_STATUSES = (QUEUED, RUNNING)
 _COLUMNS = (
     "question", "model", "status", "stage", "auto_approve",
     "plan_path", "bundle_path", "report_path", "error", "pid", "updated_at",
-    "cancel_requested", "worker_id", "log_tail", "params",
+    "cancel_requested", "worker_id", "log_tail", "params", "cost",
 )
 
 # Added after the first release; connect() backfills them on open so an
@@ -101,6 +101,7 @@ _ADDED_COLUMNS = {
     "log_tail":         "TEXT",
     "kind":             "TEXT NOT NULL DEFAULT 'research'",
     "params":           "TEXT",
+    "cost":             "TEXT",
 }
 
 # How much worker output to mirror into the row. A frontend on another host
@@ -129,6 +130,7 @@ class Job:
     log_tail: str | None = None
     kind: str = "research"
     params: str | None = None     # JSON; a pathway job's inputs, or a research job's pathway
+    cost: str | None = None       # JSON (shared/costs.py summary): spent so far, and the next stage's estimate
 
     @classmethod
     def from_row(cls, row: sqlite3.Row) -> "Job":
@@ -153,6 +155,11 @@ class Job:
         `model` is the first of them, kept for readers that know only one.
         """
         return list(self.params_dict.get("models") or [self.model])
+
+    @property
+    def cost_dict(self) -> dict:
+        """shared/costs.py's summary, written at each gate: spent so far and the next stage's estimate."""
+        return json.loads(self.cost) if self.cost else {}
 
     @property
     def completed_stages(self) -> list[str]:

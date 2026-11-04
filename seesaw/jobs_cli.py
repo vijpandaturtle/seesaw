@@ -141,11 +141,25 @@ def _describe(job) -> str:
             lines.append(f"{label:8s} {path}")
     if job.error:
         lines.append(f"error    {job.error}")
+    lines += [f"cost     {line}" if i == 0 else f"         {line}"
+              for i, line in enumerate(_cost_lines(job))]
     lines.append(f"web      {_web_url(job.id)}")
     hint = _next_step(job)
     if hint:
         lines.append(f"\nnext: {hint}")
     return "\n".join(lines)
+
+
+def _cost_lines(job) -> list[str]:
+    """Spent so far and, at a gate, what approving will cost (shared/costs.py)."""
+    from shared import costs
+
+    cost = job.cost_dict
+    if not cost:
+        return []
+    if job.status != _jobs().AWAITING:
+        cost = {**cost, "next": None}
+    return costs.describe(cost)
 
 
 def _next_step(job) -> str | None:
@@ -186,7 +200,8 @@ def follow(job_id: str, runner: str = "auto", prompt_gates: bool = True) -> int:
             printed.flush()
             print(f"\n■ {job.status} at {job.stage}")
             if job.status == jobs.AWAITING and prompt_gates and sys.stdin.isatty():
-                if _confirm(f"{_next_step(job)}\napprove now? [y/N] "):
+                cost = "".join(f"{line}\n" for line in _cost_lines(job))
+                if _confirm(f"{cost}{_next_step(job)}\napprove now? [y/N] "):
                     _approve(job_id, runner)
                     continue
             elif _next_step(job):

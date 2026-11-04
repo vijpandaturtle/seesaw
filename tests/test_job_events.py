@@ -211,8 +211,9 @@ def test_lens_records_its_stage_the_pathways_steps_and_status(jobs, events, at_l
     assert worker.run_job(at_lens) == 0
 
     rows = events.list_events(at_lens)
-    assert [e["kind"] for e in rows] == ["stage", "pathway", "step", "step", "status"]
-    stage, pathway, dla, patching, status = rows
+    assert [e["kind"] for e in rows] == ["stage", "pathway", "step", "step", "cost", "status"]
+    stage, pathway, dla, patching, cost, status = rows
+    assert cost["name"] == "lens cost" and cost["data"]["stage"] == "lens"
     assert (stage["name"], stage["status"]) == ("lens", "ok")
     assert pathway["parent_id"] == stage["id"]
     assert pathway["summary"] == "verdict: circuit_found"
@@ -222,6 +223,20 @@ def test_lens_records_its_stage_the_pathways_steps_and_status(jobs, events, at_l
     assert dla["data"]["data"]["top"] == ["L9H9"]
     assert (status["name"], status["summary"]) == ("awaiting_approval",
                                                    "waiting for approval before quill")
+
+
+def test_the_gate_carries_spent_so_far_and_the_next_stages_estimate(jobs, events, at_lens, monkeypatch):
+    from orchestrator.src import worker
+
+    monkeypatch.setattr(catalog, "run_from_params",
+                        lambda *a: PathwayResult(pathway="circuit_discovery", verdict="circuit_found"))
+    assert worker.run_job(at_lens) == 0
+    job = jobs.get(at_lens)
+    assert job.status == jobs.AWAITING and job.stage == "quill"
+    cost = job.cost_dict
+    assert [s["stage"] for s in cost["spent"]["stages"]] == ["lens"]
+    assert cost["next"]["stage"] == "quill" and cost["next"]["total_usd"] > 0
+    assert cost["next"]["basis"]
 
 
 def test_a_failed_stage_records_its_error_and_traceback(jobs, events, at_lens, monkeypatch):
