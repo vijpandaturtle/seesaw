@@ -123,8 +123,13 @@ Besides the log, every worker records a structured timeline of the job in the st
 | `pathway` / `step` | pathway run and each of its steps, with the step's numbers and plots |
 | `check` | check on Scout's pathway inputs, with the problems it sent back |
 | `error` / `status` | failure with its traceback, and every change of job status |
+| `cost` | finished stage: what it cost in Claude tokens, GPU time and runner time ([shared/costs.py](shared/costs.py)) |
 
 Events nest under the span they happened in, so an LLM call sits under its node and the node under its stage. The dashboard shows this as the job's **Timeline** tab. Long strings and lists are cut short; the artifacts on disk keep everything. Nothing is recorded outside a worker, and a timeline that can't be written prints one warning and never fails the job. The table is created the first time a current worker opens the store, like the other columns.
+
+#### Cost at each gate
+
+When a job stops at an approval gate, the worker writes its `cost` column: what the job has spent so far, stage by stage, and an estimate for the stage you are about to approve. The dashboard shows both in the approval box, and `seesaw jobs show` and the `--follow` prompt print them. Spent amounts come from the job's own timeline: every LLM call's tokens at Anthropic's list prices, every Lens experiment's GPU time when it ran on Modal (plus the minute it takes to load and the ten minutes the GPU container stays warm after, which Modal bills), and the runner's time. The estimate is the median of the last 20 finished stages of the same kind, scaled for Lens by how many Lens tools Scout's plan names. Before any stage has a `cost` record, it uses default figures measured on the first jobs, and says so. These are estimates at list prices. The Anthropic and Modal bills are the record. Prices live in `shared/costs.py` and need updating when either provider changes them.
 
 ```python
 from shared.db import events

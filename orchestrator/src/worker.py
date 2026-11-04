@@ -427,11 +427,14 @@ def _run_stage(job: Job, worker_id: str) -> int | None:
         traceback.print_exc()
         events.emit(events.ERROR, type(exc).__name__, status=events.FAILED,
                     summary=str(exc), data={"traceback": traceback.format_exc()})
+        _record_cost(job)
         jobs.update(job.id, status=jobs.FAILED,
                     error=f"{job.stage}: {type(exc).__name__}: {exc}"[:1000],
                     pid=None)
+        _save_cost(job_id, next_stage=None)
         jobs.sync_log(job_id)
         return 1
+    _record_cost(job)
 
     # Re-read: the stage wrote artifact paths, and the user may have
     # asked to cancel while it ran.
@@ -446,6 +449,13 @@ def _run_stage(job: Job, worker_id: str) -> int | None:
     jobs.advance(job)
     after = jobs.get(job_id)
     print(f"✔ stage complete — now {after.status} at {after.stage}")
+    if after.status in (jobs.AWAITING, jobs.DONE):
+        cost = _save_cost(job_id, next_stage=after.stage if after.status == jobs.AWAITING else None)
+        if cost:
+            from shared import costs
+
+            for line in costs.describe(cost):
+                print(f"   {line}")
     events.emit(events.STATUS, after.status, summary={
         jobs.AWAITING: f"waiting for approval before {after.stage}",
         jobs.QUEUED:   f"auto-approved; {after.stage} is next",
@@ -457,6 +467,41 @@ def _run_stage(job: Job, worker_id: str) -> int | None:
         jobs.update(job_id, pid=None)
         return 0
     return None
+
+
+def _record_cost(job: Job) -> None:
+    """Put what the stage just run cost on the timeline, as the record later estimates read."""
+    try:
+        from shared import costs
+
+        record = costs.stage_cost(events.list_events(job.id), job.stage)
+        events.emit(events.COST, f"{job.stage} cost", data={**record, "model": job.model},
+                    summary=f"{costs.usd(record['total_usd'])}: Claude {costs.usd(record['llm_usd'])}, "
+                            f"GPU {costs.usd(record['gpu_usd'])}, runner {costs.usd(record['runner_usd'])}")
+    except Exception as exc:                          # noqa: BLE001 — costing never fails a job
+        print(f"⚠️  couldn't cost the {job.stage} stage: {type(exc).__name__}: {exc}")
+
+
+def _save_cost(job_id: str, next_stage: str | None) -> dict | None:
+    """Store spent-so-far and the estimate for `next_stage` on the job, for whoever approves it."""
+    try:
+        from shared import costs
+
+        job = jobs.get(job_id)
+        kwargs = {}
+        if next_stage == "lens":
+            params = job.params_dict
+            kwargs["pathway"] = params.get("pathway")
+            if job.plan_path and os.path.exists(job.plan_path):
+                with open(job.plan_path) as f:
+                    kwargs["plan_text"] = f.read()
+        cost = costs.summary(events.list_events(job_id), job.stages, next_stage,
+                             events.recent_data(events.COST, limit=200), **kwargs)
+        jobs.update(job_id, cost=json.dumps(cost))
+        return cost
+    except Exception as exc:                          # noqa: BLE001 — costing never fails a job
+        print(f"⚠️  couldn't estimate the job's cost: {type(exc).__name__}: {exc}")
+        return None
 
 
 def poll(worker_id: str | None = None, interval: float = 5.0) -> int:
