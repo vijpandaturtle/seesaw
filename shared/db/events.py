@@ -49,6 +49,7 @@ STEP       = "step"          # one pathway step
 CHECK      = "check"         # a validation: Scout's pathway inputs
 NOTE       = "note"          # a decision worth seeing: what a rerun replays
 STATUS     = "status"        # the job changed state: awaiting approval, done
+COST       = "cost"          # what a finished stage cost (shared/costs.py)
 ERROR      = "error"
 
 # Event statuses.
@@ -237,6 +238,28 @@ def _encode(data: dict) -> str:
 
 
 # ── Reading ──────────────────────────────────────────────────────────────────
+def recent_data(kind: str, limit: int = 50) -> list[dict]:
+    """The data of the most recent events of `kind`, across every job, newest first.
+
+    For small, structured events (COST): a few rows of JSON, never LLM text.
+    Returns [] when the table can't be read.
+    """
+    try:
+        with jobs.connect() as conn:
+            rows = jobs._ex(conn, "SELECT data FROM job_events WHERE kind = ? AND data IS NOT NULL "
+                                  "ORDER BY id DESC LIMIT ?", (kind, limit)).fetchall()
+    except Exception as exc:                          # noqa: BLE001 — an estimate falls back
+        print(f"⚠️  couldn't read past {kind} events ({type(exc).__name__}: {exc})")
+        return []
+    out = []
+    for row in rows:
+        try:
+            out.append(json.loads(row["data"]))
+        except (TypeError, ValueError):
+            continue
+    return out
+
+
 def list_events(job_id: str, with_data: bool = True) -> list[dict]:
     """A job's events, oldest first, with `data` decoded."""
     columns = "*" if with_data else (
