@@ -49,19 +49,12 @@ from __future__ import annotations
 
 from pathlib import Path
 
-import torch
 from transformer_lens import HookedTransformer
 
-from seesaw.interp._helpers import tokens_to_ids, top_heads
-from seesaw.interp.black_box import counterfactual
-from seesaw.interp.causal_interventions import attribution_patching, head_patching
-from seesaw.interp.metrics import last_positions, logit_diff
-from seesaw.interp.model_editing import directional_ablation
-from seesaw.interp.probing import linear_probe
 from seesaw.interp.result import InterpResult
-from seesaw.interp.steering import steering_vector
 
 from .result import PathwayResult
+from .tools import Tools
 
 # Mean counterfactual effect (logits) below which there's nothing to study.
 EFFECT_MIN = 0.5
@@ -87,17 +80,8 @@ SHORTLIST_K = 10
 CARRIER_MIN = 0.10
 
 
-def _gap(model, prompts, counterfactual_prompts, pos_ids, neg_ids) -> float:
-    with torch.no_grad():
-        a = logit_diff(model(model.to_tokens(prompts)), pos_ids, neg_ids,
-                       last_positions(model, prompts)).mean().item()
-        b = logit_diff(model(model.to_tokens(counterfactual_prompts)), pos_ids, neg_ids,
-                       last_positions(model, counterfactual_prompts)).mean().item()
-    return a - b
-
-
 def run(
-    model: HookedTransformer,
+    model: HookedTransformer | str,
     prompts: list[str],
     counterfactual_prompts: list[str],
     positive_tokens: list[str],
@@ -110,7 +94,7 @@ def run(
     """Run the concept-direction pathway.
 
     Args:
-        model: Loaded HookedTransformer.
+        model: Loaded HookedTransformer, or a model name (see pathways.tools).
         prompts: Prompts carrying the concept (e.g. female-stereotyped occupations).
         counterfactual_prompts: The same prompts with the concept swapped.
         positive_tokens: Token per prompt the concept might push toward (" she").
@@ -127,11 +111,12 @@ def run(
         held-out removal and steering, the bake check, and a verdict.
     """
     result = PathwayResult(pathway=pathway)
+    tools = Tools(model, output_dir)
 
     # ── 1. Measure ────────────────────────────────────────────────────────────
-    cf = counterfactual.compute(
-        model, prompts, counterfactual_prompts, positive_tokens, negative_tokens, output_dir,
-        control_prompts=control_prompts)
+    cf = tools("counterfactual", prompts, counterfactual_prompts=counterfactual_prompts,
+               positive_tokens=positive_tokens, negative_tokens=negative_tokens,
+               control_prompts=control_prompts)
     result.steps["counterfactual"] = cf
     effect = cf.data["mean_effect"]
     result.findings.update({"mean_effect": effect, "sign_consistency": cf.data["sign_consistency"]})
@@ -158,26 +143,29 @@ def run(
     result.findings["split"] = {"fit": len(fit), "held_out": len(test)}
 
     # ── 2. Find ───────────────────────────────────────────────────────────────
-    probe = linear_probe.compute(model, p_fit, cf_fit, output_dir)
+    probe = tools("linear_probe", p_fit, counterfactual_prompts=cf_fit)
     result.steps["linear_probe"] = probe
     layer, acc = probe.data["best_layer"], probe.data["best_accuracy"]
     shuffled = probe.data["shuffled_accuracy"]
     encoded = acc - shuffled >= PROBE_MARGIN
-    direction = probe.data["direction"]
+    # The direction itself (the difference of means at `layer` on the fitting
+    # half) is rebuilt from the same prompts by each tool that uses it.
+    fitted = {"layer": layer, "fit_prompts": p_fit, "fit_counterfactual_prompts": cf_fit}
     result.findings.update({"probe_layer": layer, "probe_accuracy": acc, "shuffled_accuracy": shuffled})
     result.evidence.append(
         f"On the fitting half, a probe separates the two groups with {acc:.0%} accuracy from layer "
         f"{layer}; on shuffled labels it scores {shuffled:.0%}"
         + (" — no better, so nothing here is encoded beyond noise." if not encoded else "."))
 
-    aligned = model.to_tokens(prompts).shape == model.to_tokens(counterfactual_prompts).shape
+    # Padded batch shapes, as the patching tools see them.
+    aligned = max(tools.token_lengths(prompts)) == max(tools.token_lengths(counterfactual_prompts))
     if aligned:
-        atp = attribution_patching.compute(
-            model, prompts, counterfactual_prompts, positive_tokens, negative_tokens, output_dir)
+        patch = {"corrupted_prompts": counterfactual_prompts, "positive_tokens": positive_tokens,
+                 "negative_tokens": negative_tokens}
+        atp = tools("attribution_patching", prompts, **patch, top_k=SHORTLIST_K)
         result.steps["attribution_patching"] = atp
-        shortlist = [h for h, _ in top_heads(torch.tensor(atp.data["head_effects"]), SHORTLIST_K)]
-        hp = head_patching.compute(
-            model, prompts, counterfactual_prompts, positive_tokens, negative_tokens, shortlist, output_dir)
+        shortlist = [h for h, _ in atp.data["top_heads"]]
+        hp = tools("head_patching", prompts, **patch, heads=shortlist)
         result.steps["head_patching"] = hp
         carriers = {h: r for h, r in hp.data["per_head"].items() if r >= CARRIER_MIN}
         result.findings["carrier_heads"] = carriers
@@ -191,9 +179,9 @@ def run(
         result.evidence.append("Prompt pairs differ in length, so head-level patching was skipped.")
 
     # ── 3. Test, on the held-out half ─────────────────────────────────────────
-    da = directional_ablation.compute(
-        model, p_test, pos_test, neg_test, direction, output_dir,
-        counterfactual_prompts=cf_test, control_texts=control_texts)
+    held_out = {"counterfactual_prompts": cf_test, "positive_tokens": pos_test,
+                "negative_tokens": neg_test, "control_texts": control_texts, **fitted}
+    da = tools("directional_ablation", p_test, **held_out, bake=True)
     result.steps["directional_ablation"] = da
     removed, rand = da.data["fraction_removed"], da.data["random_fraction_removed"]
     loss_up = da.data["control_loss_after"] - da.data["control_loss_before"]
@@ -207,9 +195,7 @@ def run(
         f"{held_gap:+.2f} gap (random directions: {rand:.0%}); loss on control text changes by "
         f"{loss_up:+.2f} nats.")
 
-    steer = steering_vector.compute(
-        model, cf_test, pos_test, neg_test, direction, layer, output_dir,
-        alphas=[0.0, 0.25, 0.5, 0.75, 1.0], control_texts=control_texts)
+    steer = tools("steering_vector", p_test, **held_out, alphas=[0.0, 0.25, 0.5, 0.75, 1.0])
     result.steps["steering"] = steer
     shift = steer.data["lds"][-1] - steer.data["lds"][0]
     moved = shift / held_gap if abs(held_gap) > 1e-6 else 0.0
@@ -227,9 +213,9 @@ def run(
         f"{steer_loss:+.2f} nats.")
 
     # ── 4. Bake ───────────────────────────────────────────────────────────────
-    pos_ids, neg_ids = tokens_to_ids(model, pos_test), tokens_to_ids(model, neg_test)
-    with directional_ablation.orthogonalized(model, direction):
-        baked = _gap(model, p_test, cf_test, pos_ids, neg_ids)
+    # directional_ablation(bake=True) folded the removal into the weights,
+    # re-measured, and restored them.
+    baked = da.data["baked_effect_after"]
     hooked = da.data["effect_after"]
     matches = abs(baked - hooked) <= BAKE_TOLERANCE * abs(held_gap) + 1e-3
     result.steps["bake_check"] = InterpResult(data={

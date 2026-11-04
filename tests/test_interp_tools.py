@@ -354,6 +354,10 @@ def test_pathways_run_end_to_end(model, tmp_path, monkeypatch):
     monkeypatch.setattr(circuit_discovery, "EFFECT_MIN", -1e9)
     monkeypatch.setattr(concept_direction, "EFFECT_MIN", 0.0)
     monkeypatch.setattr(feature_explain, "EFFECT_MIN", -1e9)
+    # The feature tools load the SAE for a layer; here, an identity one.
+    from lens.mcp_server.src.tools import features
+    fakes = {1: FakeSAE(model.cfg.d_model), 0: FakeSAE0(model.cfg.d_model)}
+    monkeypatch.setattr(features, "_load", lambda m, layer: (layer, fakes[layer]))
 
     cd = circuit_discovery.run(model, PROMPTS, POS, NEG, tmp_path / "cd", corrupted_prompts=CORRUPTED)
     assert cd.verdict in {"circuit_found", "partial_circuit", "no_circuit"}
@@ -372,10 +376,9 @@ def test_pathways_run_end_to_end(model, tmp_path, monkeypatch):
     short = concept_direction.run(model, PROMPTS, CORRUPTED, POS, NEG, tmp_path / "short")
     assert short.verdict == "inconclusive" and short.stopped_early
 
-    fe = feature_explain.run(model, FakeSAE(model.cfg.d_model), PROMPTS, POS, NEG, tmp_path / "fe")
+    fe = feature_explain.run(model, 1, PROMPTS, POS, NEG, tmp_path / "fe")
     assert fe.verdict in {"features_explain", "partial", "not_explained"} or fe.stopped_early
-    sweep = feature_explain.run(model, [FakeSAE(model.cfg.d_model), FakeSAE0(model.cfg.d_model)],
-                                PROMPTS, POS, NEG, tmp_path / "fe2", search_neuronpedia=False)
+    sweep = feature_explain.run(model, [1, 0], PROMPTS, POS, NEG, tmp_path / "fe2", search_neuronpedia=False)
     assert sweep.stopped_early or set(sweep.findings["explained_by_layer"]) <= {
         "blocks.1.hook_resid_pre", "blocks.0.hook_resid_pre"}
     assert "confirmed_mlps" in cd.findings

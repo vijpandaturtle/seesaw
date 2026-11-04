@@ -37,6 +37,9 @@ class LensTool(NamedTuple):
 
 LENS_TOOLS: dict[str, LensTool] = {
     # ── descriptive ──────────────────────────────────────────────────────────
+    "answer_scores": LensTool(
+        "descriptive", "the answer token's probability on each prompt, and its logit diff over negative_tokens: "
+                       "does the model do the task at all?"),
     "logit_lens": LensTool(
         "descriptive", "project the residual stream at each layer to vocabulary: where the prediction forms"),
     "attention_pattern": LensTool(
@@ -46,8 +49,14 @@ LENS_TOOLS: dict[str, LensTool] = {
     "linear_probe": LensTool(
         "descriptive", "is a concept linearly decodable from the residual stream, and from which layer "
                        "(prompts vs counterfactual_prompts)"),
+    "probe_transfer": LensTool(
+        "descriptive", "train a probe on prompts vs counterfactual_prompts and score it on held-out test_prompts vs "
+                       "test_counterfactual_prompts, against shuffled labels, embeddings alone and bag-of-words"),
     "feature_search": LensTool(
         "descriptive", "which SAE features fire on the prompts, with Neuronpedia's explanations; no gradients"),
+    "feature_lookup": LensTool(
+        "descriptive", "Neuronpedia's explanation, promoted and suppressed tokens for named SAE `features` at a "
+                       "layer"),
     "counterfactual": LensTool(
         "descriptive", "swap one attribute in the input (counterfactual_prompts) and measure how far the "
                        "output moves; inputs and outputs only"),
@@ -71,6 +80,8 @@ LENS_TOOLS: dict[str, LensTool] = {
         "causal", "patch the clean residual stream into the corrupted run by layer and position"),
     "head_patching": LensTool(
         "causal", "patch named heads from clean into corrupted, each alone and all together"),
+    "mlp_patching": LensTool(
+        "causal", "patch each MLP layer's output from clean into corrupted, one layer at a time"),
     "circuit_evaluation": LensTool(
         "causal", "how much behaviour a set of heads keeps (faithfulness) and removes (necessity), vs random "
                   "head sets"),
@@ -85,6 +96,18 @@ LENS_TOOLS: dict[str, LensTool] = {
     "feature_clamping": LensTool(
         "causal", "switch named SAE features off (or set them to a value) and measure the logit diff, vs random "
                   "features"),
+    "leace_erasure": LensTool(
+        "causal", "erase what separates prompts from counterfactual_prompts (LEACE, every residual site, fitted on "
+                  "held-out pairs): does the attribute's pull go, and does the task survive? vs random erasers"),
+    "causal_tracing": LensTool(
+        "causal", "noise the subject's embeddings (needs `subjects`), restore residual / MLP / attention at each "
+                  "layer and position: where a fact is retrieved"),
+    "rome_edits": LensTool(
+        "causal", "rewrite each fact to target_tokens with ROME at each layer, scored on efficacy, paraphrase and "
+                  "specificity: where a fact can be edited"),
+    "model_diff": LensTool(
+        "causal", "compare the model with other_model (a fine-tune or edit of it): KL per prompt, tokens it "
+                  "favours, and which component's weights account for the change"),
 }
 
 
@@ -140,7 +163,9 @@ TOOL_CHAINS: dict[str, str] = {
     "seesaw": (
         "attribution_patching or direct_logit_attribution -> head_patching or ablation with `heads` -> "
         "circuit_evaluation; edge_attribution_patching -> path_patching; counterfactual -> linear_probe -> "
-        "directional_ablation or steering_vector; feature_attribution -> feature_clamping. "
+        "directional_ablation or steering_vector or leace_erasure; feature_attribution -> feature_clamping, "
+        "feature_lookup; answer_scores -> causal_tracing -> rome_edits for facts; linear_probe -> probe_transfer; "
+        "attribution_patching -> mlp_patching for MLPs. "
         "circuit_tracing reads attribution graphs from Neuronpedia for gemma-2-2b only."
     ),
     "lever": (

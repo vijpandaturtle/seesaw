@@ -1,4 +1,4 @@
-"""Hand-coded pathways — expert recipes that chain seesaw.interp tools to answer an interp question.
+"""Hand-coded pathways — expert recipes that chain Lens's tools to answer an interp question.
 
 A single `seesaw.interp` function answers a narrow question ("which heads write
 the answer direction?"). A pathway is the sequence a researcher would actually
@@ -9,14 +9,19 @@ signal enters.
 Pathways sit between the library and the agents:
 
     seesaw.interp      — single techniques, pure functions
-    seesaw.pathways    — fixed, hand-written chains of those techniques  ← here
-    lens               — an LLM choosing techniques on its own
+    lens tool registry — those techniques as tools, run in-process or on Modal
+    seesaw.pathways    — fixed, hand-written chains of those tools  ← here
+    lens (the graph)   — an LLM choosing tools on its own
 
-They import only from `seesaw.interp`, never from Lens, MCP or LangGraph, so a
-pathway is the expert baseline Lens can be evaluated against: run both on the
-same task and compare findings.
+Every step is a call to a tool in Lens's registry, through
+seesaw.pathways.tools: the same tools, run the same way (on the GPU app when
+SEESAW_LENS_BACKEND=modal), as Lens's own experiments. Nothing else of Lens's
+is used (no MCP, LangGraph or LLM), so a pathway is the expert baseline Lens
+can be evaluated against: the same tools, chained by hand instead of by the
+agent.
 
-Each pathway is a module exposing `run(model, ..., output_dir) -> PathwayResult`
+Each pathway is a module exposing `run(model, ..., output_dir) -> PathwayResult`,
+where `model` is a loaded HookedTransformer or a model name,
 and follows the same shape: measure (is there an effect?) → nominate (cheap
 ranking of every candidate) → verify (real interventions on the shortlist) →
 conclude (fixed thresholds, named as module constants, produce a verdict).

@@ -35,16 +35,10 @@ from __future__ import annotations
 
 from pathlib import Path
 
-import torch
 from transformer_lens import HookedTransformer
 
-from seesaw.interp._helpers import tokens_to_ids
-from seesaw.interp.black_box import counterfactual
-from seesaw.interp.metrics import last_positions, logit_diff
-from seesaw.interp.model_editing import leace
-from seesaw.interp.result import InterpResult
-
 from .result import PathwayResult
+from .tools import Tools
 
 # The task's logit diff on the prompts must clear this for reliance to mean anything.
 TASK_MIN = 0.5
@@ -59,19 +53,8 @@ LOSS_MAX_INCREASE = 0.5
 MIN_PAIRS = 6
 
 
-def _lds(model, prompts, pos_ids, neg_ids) -> torch.Tensor:
-    with torch.no_grad():
-        return logit_diff(model(model.to_tokens(prompts)), pos_ids, neg_ids,
-                          last_positions(model, prompts)).cpu()
-
-
-def _loss(model, texts) -> float:
-    with torch.no_grad():
-        return sum(model(model.to_tokens(t), return_type="loss").item() for t in texts) / len(texts)
-
-
 def run(
-    model: HookedTransformer,
+    model: HookedTransformer | str,
     prompts: list[str],
     counterfactual_prompts: list[str],
     positive_tokens: list[str],
@@ -82,7 +65,7 @@ def run(
     """Run the spurious audit.
 
     Args:
-        model: Loaded HookedTransformer.
+        model: Loaded HookedTransformer, or a model name (see pathways.tools).
         prompts: Task prompts carrying the attribute (e.g. a review signed "Mary").
         counterfactual_prompts: The same prompts with only the attribute swapped ("John").
         positive_tokens: The task's correct answer per prompt (" positive").
@@ -95,11 +78,11 @@ def run(
         erasure, the random-erasure control, and a verdict.
     """
     result = PathwayResult(pathway="spurious_audit")
-    pos_ids, neg_ids = tokens_to_ids(model, positive_tokens), tokens_to_ids(model, negative_tokens)
+    tools = Tools(model, output_dir)
 
     # ── 1. Measure ────────────────────────────────────────────────────────────
-    cf = counterfactual.compute(
-        model, prompts, counterfactual_prompts, positive_tokens, negative_tokens, output_dir)
+    cf = tools("counterfactual", prompts, counterfactual_prompts=counterfactual_prompts,
+               positive_tokens=positive_tokens, negative_tokens=negative_tokens)
     result.steps["counterfactual"] = cf
     task = sum(cf.data["prompt_lds"]) / len(cf.data["prompt_lds"])
     reliance = sum(abs(e) for e in cf.data["effects"]) / len(cf.data["effects"])
@@ -123,49 +106,33 @@ def run(
     def pick(xs, idx):
         return [xs[i] for i in idx]
 
-    erasers = leace.fit_all(model, pick(prompts, fit), pick(counterfactual_prompts, fit))
-    p_test, cf_test = pick(prompts, test), pick(counterfactual_prompts, test)
-    pt, nt = pick(pos_ids, test), pick(neg_ids, test)
-    texts = control_texts or p_test
-
-    def measure(run_model):
-        a, b = _lds(run_model, p_test, pt, nt), _lds(run_model, cf_test, pt, nt)
-        return (a - b).abs().mean().item(), a.mean().item(), _loss(run_model, texts)
-
-    before = measure(model)
-    with leace.erased(model, erasers):
-        after = measure(model)
-    with leace.erased(model, leace.random_erasers(erasers)):
-        rand = measure(model)
-
-    def removed(m):
-        return 1 - m[0] / before[0] if before[0] > 1e-6 else 0.0
-
-    kept = after[1] / before[1] if abs(before[1]) > 1e-6 else 0.0
-    loss_up = after[2] - before[2]
-    result.steps["leace_erasure"] = InterpResult(data={
-        "reliance_before": round(before[0], 4), "reliance_after": round(after[0], 4),
-        "reliance_after_random": round(rand[0], 4),
-        "task_before": round(before[1], 4), "task_after": round(after[1], 4),
-        "control_loss_before": round(before[2], 4), "control_loss_after": round(after[2], 4),
-        "random_fraction_removed": round(removed(rand), 4),
-    })
+    # leace_erasure fits the erasers on the fitting half, applies them (and
+    # random ones) on the held-out half, and measures before and after.
+    le = tools("leace_erasure", pick(prompts, test),
+               counterfactual_prompts=pick(counterfactual_prompts, test),
+               positive_tokens=pick(positive_tokens, test), negative_tokens=pick(negative_tokens, test),
+               fit_prompts=pick(prompts, fit), fit_counterfactual_prompts=pick(counterfactual_prompts, fit),
+               control_texts=control_texts)
+    result.steps["leace_erasure"] = le
+    removed, rand_removed = le.data["fraction_removed"], le.data["random_fraction_removed"]
+    kept, before_task, after_task = le.data["task_kept"], le.data["task_before"], le.data["task_after"]
+    loss_up = le.data["control_loss_after"] - le.data["control_loss_before"]
     result.findings.update({
-        "fraction_removed": round(removed(after), 4),
-        "random_fraction_removed": round(removed(rand), 4),
-        "task_kept": round(kept, 4),
+        "fraction_removed": removed,
+        "random_fraction_removed": rand_removed,
+        "task_kept": kept,
         "control_loss_increase": round(loss_up, 4),
     })
 
     # ── 3. Check ──────────────────────────────────────────────────────────────
     result.evidence.append(
-        f"On the held-out pairs, erasing the attribute removes {removed(after):.0%} of the reliance "
-        f"(random erasers: {removed(rand):.0%}).")
+        f"On the held-out pairs, erasing the attribute removes {removed:.0%} of the reliance "
+        f"(random erasers: {rand_removed:.0%}).")
     result.evidence.append(
-        f"The task keeps {kept:.0%} of its logit diff ({before[1]:+.2f} → {after[1]:+.2f}); loss on "
+        f"The task keeps {kept:.0%} of its logit diff ({before_task:+.2f} → {after_task:+.2f}); loss on "
         f"control text changes by {loss_up:+.2f} nats.")
 
-    erased_it = removed(after) >= REMOVE_MIN and removed(after) - removed(rand) >= RANDOM_MARGIN
+    erased_it = removed >= REMOVE_MIN and removed - rand_removed >= RANDOM_MARGIN
     if erased_it and kept >= TASK_KEEP_MIN and loss_up <= LOSS_MAX_INCREASE:
         result.verdict = "removable"
     elif erased_it:

@@ -1,4 +1,4 @@
-"""Agent-facing wrappers over the SAE feature tools: feature_search, feature_attribution, feature_clamping.
+"""Agent-facing wrappers over the SAE feature tools: feature_search, feature_attribution, feature_clamping, feature_lookup.
 
 The agent names a layer; the SAE comes from SAELens's directory
 (seesaw.interp.feature_extraction.sae.find_sae), preferring the release
@@ -13,6 +13,7 @@ from transformer_lens import HookedTransformer
 
 from seesaw.interp.feature_extraction import feature_attribution as _feature_attribution
 from seesaw.interp.feature_extraction import feature_search as _feature_search
+from seesaw.interp.feature_extraction import neuronpedia as _neuronpedia
 from seesaw.interp.feature_extraction.sae import find_sae, load_sae
 from seesaw.interp.steering import feature_clamping as _feature_clamping
 
@@ -31,6 +32,12 @@ def _sae(model: HookedTransformer, layer: int | None):
     layer = _default_layer(model) if layer is None else layer
     release, sae_id, source = find_sae(model.cfg.model_name, layer)
     return layer, release, sae_id, source
+
+
+def _load(model: HookedTransformer, layer: int | None):
+    """(layer, loaded SAE) for this model at `layer`: the SAE every feature tool here reads."""
+    layer, release, sae_id, _ = _sae(model, layer)
+    return layer, load_sae(release, sae_id, device=str(model.cfg.device))
 
 
 def run_feature_search(
@@ -62,6 +69,7 @@ def run_feature_attribution(
     negative_tokens: list[str],
     layer: int | None = None,
     top_k: int = 10,
+    explain: bool = True,
     output_dir: Path = PLOTS_DIR,
 ) -> ExperimentResult:
     """Score every SAE feature at `layer` by its contribution to the logit diff, labelled from Neuronpedia.
@@ -69,10 +77,9 @@ def run_feature_attribution(
     An estimate: confirm the top features with feature_clamping.
     Answers: "Which interpretable features drive this output?"
     """
-    layer, release, sae_id, _ = _sae(model, layer)
-    sae = load_sae(release, sae_id, device=str(model.cfg.device))
+    layer, sae = _load(model, layer)
     result = _feature_attribution.compute(model, sae, prompts, positive_tokens, negative_tokens,
-                                          output_dir, top_k=top_k)
+                                          output_dir, top_k=top_k, explain=explain)
     result.data["layer"] = layer
     return wrap(result, f"Feature Attribution (layer {layer})", "feature_attribution", model, prompts)
 
@@ -92,9 +99,40 @@ def run_feature_clamping(
     `layer` must be the one the feature indices came from.
     Answers: "Does the output actually depend on these features?"
     """
-    layer, release, sae_id, _ = _sae(model, layer)
-    sae = load_sae(release, sae_id, device=str(model.cfg.device))
+    layer, sae = _load(model, layer)
     result = _feature_clamping.compute(model, sae, prompts, positive_tokens, negative_tokens,
                                        [int(f) for f in features], output_dir, value=value)
     result.data["layer"] = layer
     return wrap(result, f"Feature Clamping (layer {layer})", "feature_clamping", model, prompts)
+
+
+def run_feature_lookup(
+    model: HookedTransformer,
+    prompts: list[str],
+    features: list[int],
+    layer: int | None = None,
+    output_dir: Path = PLOTS_DIR,
+) -> ExperimentResult:
+    """Look the listed SAE features up on Neuronpedia: explanation, tokens they promote and suppress, dashboard link.
+
+    `layer` must be the one the indices came from. The prompts are not used.
+    Explanations are written automatically and can be wrong: labels, not evidence.
+    Answers: "What are these features?"
+    """
+    layer, _, _, source = _sae(model, layer)
+    looked_up = []
+    for index in (int(f) for f in features):
+        entry = {"index": index, "explanation": None,
+                 "url": _neuronpedia.feature_url(source, index) if source else None}
+        if source:
+            try:
+                entry.update(_neuronpedia.get_feature(source, index))
+            except _neuronpedia.NeuronpediaError as exc:
+                entry["error"] = str(exc)
+        looked_up.append(entry)
+    return ExperimentResult(
+        name=f"Feature Lookup (layer {layer})", tool="feature_lookup",
+        model_name=model.cfg.model_name, prompts=prompts,
+        data={"layer": layer, "neuronpedia_source": source, "features": looked_up},
+        status="success",
+    )

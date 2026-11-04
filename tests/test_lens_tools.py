@@ -68,9 +68,14 @@ PLAN_KWARGS = {
     "corrupted_prompts": CORRUPTED,         # routed to counterfactual_prompts where needed
     "heads":             ["L1H2", "L0H1"],
     "edges":             ["L0H1->L1H2.q", "L1H2->logits"],
+    "subjects":          ["When Mary and John", "When Alice and Bob"],
+    "target_tokens":     [" Paris", " Rome"],
+    "test_prompts":      PROMPTS,
+    "test_counterfactual_prompts": CORRUPTED,
 }
 # Need a published SAE for the model, or Neuronpedia's graph service.
-EXTERNAL_TOOLS = {"feature_search", "feature_attribution", "feature_clamping", "circuit_tracing"}
+EXTERNAL_TOOLS = {"feature_search", "feature_attribution", "feature_clamping", "circuit_tracing",
+                  "feature_lookup"}
 
 
 @pytest.mark.parametrize("backend", BACKENDS)
@@ -88,7 +93,9 @@ def model():
 
 @pytest.mark.parametrize("tool", [t for t in LENS_TOOLS if t not in EXTERNAL_TOOLS])
 def test_every_tool_runs_through_dispatch(tool, model, tmp_path):
-    kwargs, missing, _ = normalize_tool_kwargs(tool, PLAN_KWARGS, len(PROMPTS))
+    # model_diff loads other_model by name; in-process it can take the model itself.
+    plan = dict(PLAN_KWARGS, other_model=model) if tool == "model_diff" else PLAN_KWARGS
+    kwargs, missing, _ = normalize_tool_kwargs(tool, plan, len(PROMPTS))
     assert not missing, f"{tool} needs {missing}, which a plan using the documented names would provide"
     result = run_in_sandbox(
         TOOL_REGISTRY[tool],

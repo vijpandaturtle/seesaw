@@ -87,11 +87,9 @@ class _Report:
 
 
 def feature_explain(model):
-    from seesaw.interp.feature_extraction.sae import load_sae
     from seesaw.pathways import feature_explain as pw
 
-    sae = load_sae("gpt2-small-res-jb", "blocks.8.hook_resid_pre")
-    return pw.run(model, sae, IOI, IO, S, OUT / "feature_explain")
+    return pw.run(model, 8, IOI, IO, S, OUT / "feature_explain")   # gpt2-small-res-jb, layer 8
 
 
 CASES = {f.__name__: f for f in (circuit_discovery, attribute_audit, attribute_audit_control,

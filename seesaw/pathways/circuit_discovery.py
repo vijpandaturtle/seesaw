@@ -43,15 +43,10 @@ from pathlib import Path
 import torch
 from transformer_lens import HookedTransformer
 
-from seesaw.interp._helpers import parse_head, tokens_to_ids, top_heads
-from seesaw.interp.causal_interventions import ablation, attribution_patching, head_patching, mlp_patching
-from seesaw.interp.circuit_finding import (
-    circuit_evaluation, edge_attribution_patching, path_patching,
-)
-from seesaw.interp.metrics import logit_diff
-from seesaw.interp.visualization import direct_logit_attribution
+from seesaw.interp._helpers import parse_head, top_heads
 
 from .result import PathwayResult
+from .tools import Tools
 
 # Clean logit diff below this (in logits) means there's no behaviour to explain.
 EFFECT_MIN = 1.0
@@ -74,7 +69,7 @@ EAP_IG_STEPS = 5
 
 
 def run(
-    model: HookedTransformer,
+    model: HookedTransformer | str,
     prompts: list[str],
     positive_tokens: list[str],
     negative_tokens: list[str],
@@ -85,7 +80,8 @@ def run(
     """Run the circuit-discovery pathway on a logit-difference task.
 
     Args:
-        model:             Loaded HookedTransformer.
+        model:             Loaded HookedTransformer, or a model name to run each step
+                           wherever SEESAW_LENS_BACKEND sends Lens's experiments.
         prompts:           Clean prompts.
         positive_tokens:   Correct answer token per prompt (e.g. " Mary").
         negative_tokens:   Distractor token per prompt (e.g. " John").
@@ -101,13 +97,13 @@ def run(
         PathwayResult with every step, head roles, and a verdict.
     """
     result = PathwayResult(pathway="circuit_discovery")
+    tools = Tools(model, output_dir)
+    answers = {"positive_tokens": positive_tokens, "negative_tokens": negative_tokens}
+    patch = {"corrupted_prompts": corrupted_prompts, **answers}
 
     # ── 1. Measure ────────────────────────────────────────────────────────────
-    with torch.no_grad():
-        logits = model(model.to_tokens(prompts))
-    baseline = logit_diff(
-        logits, tokens_to_ids(model, positive_tokens), tokens_to_ids(model, negative_tokens)
-    ).mean().item()
+    # Read at the batch's last position, as every later step here does.
+    baseline = tools("answer_scores", prompts, **answers, pos=-1).data["mean_logit_diff"]
     result.findings["baseline_logit_diff"] = round(baseline, 4)
     if baseline < EFFECT_MIN:
         return result.stop(
@@ -115,19 +111,18 @@ def run(
     result.evidence.append(f"The model prefers the answer by {baseline:.2f} logits on the clean prompts.")
 
     # ── 2. Nominate ───────────────────────────────────────────────────────────
-    dla = direct_logit_attribution.compute(model, prompts, positive_tokens, negative_tokens, output_dir)
+    dla = tools("direct_logit_attribution", prompts, **answers)
     result.steps["direct_logit_attribution"] = dla
     head_attrs = torch.tensor(dla.data["head_attrs"])
     writers = [h for h, _ in top_heads(head_attrs, DLA_K)]
     against = [h for h, _ in top_heads(-head_attrs, DLA_K)]
 
     if corrupted_prompts:
-        atp = attribution_patching.compute(
-            model, prompts, corrupted_prompts, positive_tokens, negative_tokens, output_dir)
+        atp = tools("attribution_patching", prompts, **patch, top_k=SHORTLIST_K)
         result.steps["attribution_patching"] = atp
-        ranked = [h for h, _ in top_heads(torch.tensor(atp.data["head_effects"]), SHORTLIST_K)]
+        ranked = [h for h, _ in atp.data["top_heads"]]
     else:
-        sweep = ablation.compute(model, prompts, positive_tokens, negative_tokens, output_dir)
+        sweep = tools("ablation", prompts, **answers)
         result.steps["ablation_sweep"] = sweep
         result.evidence.append(
             "No corrupted prompts: heads were nominated and tested by mean ablation, which pushes "
@@ -139,14 +134,12 @@ def run(
 
     # ── 3. Verify ─────────────────────────────────────────────────────────────
     if corrupted_prompts:
-        verify = head_patching.compute(
-            model, prompts, corrupted_prompts, positive_tokens, negative_tokens, shortlist, output_dir)
+        verify = tools("head_patching", prompts, **patch, heads=shortlist)
         result.steps["head_patching"] = verify
         effect = verify.data["per_head"]
         how = "patching it alone recovers"
     else:
-        verify = ablation.compute(
-            model, prompts, positive_tokens, negative_tokens, output_dir, heads=shortlist)
+        verify = tools("ablation", prompts, **answers, heads=shortlist)
         result.steps["ablation"] = verify
         effects = verify.data["effects"]
         effect = {h: effects[l][hd] / baseline for h in shortlist for l, hd in [parse_head(h)]}
@@ -168,7 +161,7 @@ def run(
             f"All {len(shortlist)} shortlisted heads patched together recover "
             f"{verify.data['joint_recovery']:.0%}.")
     if corrupted_prompts:
-        mp = mlp_patching.compute(model, prompts, corrupted_prompts, positive_tokens, negative_tokens, output_dir)
+        mp = tools("mlp_patching", prompts, **patch)
         result.steps["mlp_patching"] = mp
         mlps = {f"MLP{l}": r for l, r in mp.data["per_layer"].items() if r >= CONFIRM_EFFECT}
         result.findings["confirmed_mlps"] = mlps
@@ -180,9 +173,8 @@ def run(
         return result.stop("no_circuit", f"no shortlisted head reached {CONFIRM_EFFECT:.0%} alone")
 
     # ── 4. Evaluate ───────────────────────────────────────────────────────────
-    ev = circuit_evaluation.compute(
-        model, prompts, positive_tokens, negative_tokens, confirmed, output_dir,
-        reference_prompts=reference_prompts)
+    ev = tools("circuit_evaluation", prompts, **answers, heads=confirmed,
+               reference_prompts=reference_prompts)
     result.steps["circuit_evaluation"] = ev
     faith, rand = ev.data["faithfulness"], ev.data["random_faithfulness"]
     result.findings.update({
@@ -206,13 +198,9 @@ def run(
 
     # ── 5. Wire ───────────────────────────────────────────────────────────────
     if corrupted_prompts:
-        eap = edge_attribution_patching.compute(
-            model, prompts, corrupted_prompts, positive_tokens, negative_tokens, output_dir,
-            top_k=EDGE_K, ig_steps=EAP_IG_STEPS)
+        eap = tools("edge_attribution_patching", prompts, **patch, top_k=EDGE_K, ig_steps=EAP_IG_STEPS)
         result.steps["edge_attribution_patching"] = eap
-        pp = path_patching.compute(
-            model, prompts, corrupted_prompts, positive_tokens, negative_tokens,
-            [e for e, _ in eap.data["top_edges"]], output_dir)
+        pp = tools("path_patching", prompts, **patch, edges=[e for e, _ in eap.data["top_edges"]])
         result.steps["path_patching"] = pp
         confirmed_edges = {e: r for e, r in pp.data["per_edge"].items() if abs(r) >= EDGE_CONFIRM}
         result.findings["confirmed_edges"] = dict(sorted(confirmed_edges.items(), key=lambda kv: -abs(kv[1])))

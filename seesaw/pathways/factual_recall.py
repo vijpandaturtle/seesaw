@@ -34,10 +34,8 @@ from pathlib import Path
 import torch
 from transformer_lens import HookedTransformer
 
-from seesaw.interp._helpers import tokens_to_ids
-from seesaw.interp.causal_interventions import causal_tracing
-
 from .result import PathwayResult
+from .tools import Tools
 
 # Mean probability of the true answer the model must reach to "know" the facts.
 P_MIN = 0.05
@@ -50,7 +48,7 @@ SUBJECT_OVER_FINAL = 1.5
 
 
 def run(
-    model: HookedTransformer,
+    model: HookedTransformer | str,
     prompts: list[str],
     subjects: list[str],
     positive_tokens: list[str],
@@ -59,7 +57,7 @@ def run(
     """Run the factual-recall pathway.
 
     Args:
-        model: Loaded HookedTransformer.
+        model: Loaded HookedTransformer, or a model name (see pathways.tools).
         prompts: Factual prompts, each ending right before the answer.
         subjects: The subject inside each prompt (must appear verbatim).
         positive_tokens: The true answer token per prompt.
@@ -69,21 +67,17 @@ def run(
         PathwayResult with the tracing grids, each kind's peak, and a verdict.
     """
     result = PathwayResult(pathway="factual_recall")
+    tools = Tools(model, output_dir)
 
     # ── 1. Measure ────────────────────────────────────────────────────────────
-    ids = tokens_to_ids(model, positive_tokens)
-    probs = []
-    for p, i in zip(prompts, ids):
-        with torch.no_grad():
-            probs.append(model(model.to_tokens(p))[0, -1].softmax(-1)[i].item())
-    known = sum(probs) / len(probs)
+    known = tools("answer_scores", prompts, positive_tokens=positive_tokens).data["mean_probability"]
     result.findings["answer_probability"] = round(known, 4)
     if known < P_MIN:
         return result.stop("no_recall", f"the true answers average probability {known:.3f}, under {P_MIN}")
     result.evidence.append(f"The model gives the true answers {known:.0%} probability on average.")
 
     # ── 2. Trace ──────────────────────────────────────────────────────────────
-    ct = causal_tracing.compute(model, prompts, subjects, positive_tokens, output_dir)
+    ct = tools("causal_tracing", prompts, subjects=subjects, positive_tokens=positive_tokens)
     result.steps["causal_tracing"] = ct
     clean, corrupt = ct.data["clean_prob"], ct.data["corrupted_prob"]
     result.findings.update({"corrupted_probability": corrupt, "peaks": ct.data["peaks"]})
@@ -100,7 +94,7 @@ def run(
     subj_layer = int(mlp[:, subj].argmax())
     subj_peak, final_peak = mlp[subj_layer, subj].item(), mlp[:, final].max().item()
     attn_layer = int(attn[:, final].argmax())
-    n_layers = model.cfg.n_layers
+    n_layers = tools.n_layers
     result.findings.update({
         "subject_mlp_layer": subj_layer, "subject_mlp_recovery": round(subj_peak, 4),
         "final_mlp_recovery": round(final_peak, 4),

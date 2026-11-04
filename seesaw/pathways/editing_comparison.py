@@ -30,11 +30,8 @@ from pathlib import Path
 import torch
 from transformer_lens import HookedTransformer
 
-from seesaw.interp.causal_interventions import causal_tracing
-from seesaw.interp.model_editing import rome
-from seesaw.interp.result import InterpResult
-
 from .result import PathwayResult
+from .tools import Tools
 
 # The best layer's edits must work on at least this share of facts.
 EFFICACY_MIN = 0.5
@@ -54,7 +51,7 @@ def _spearman(a: list[float], b: list[float]) -> float:
 
 
 def run(
-    model: HookedTransformer,
+    model: HookedTransformer | str,
     prompts: list[str],
     subjects: list[str],
     positive_tokens: list[str],
@@ -68,7 +65,7 @@ def run(
     """Run the editing comparison.
 
     Args:
-        model: Loaded HookedTransformer.
+        model: Loaded HookedTransformer, or a model name (see pathways.tools).
         prompts: One factual prompt per fact, ending right before the answer.
         subjects: The subject inside each prompt.
         positive_tokens: The true answer per fact.
@@ -85,10 +82,11 @@ def run(
         correlation, and a verdict.
     """
     result = PathwayResult(pathway="editing_comparison")
-    layers = list(range(model.cfg.n_layers)) if layers is None else layers
+    tools = Tools(model, output_dir)
+    layers = list(range(tools.n_layers)) if layers is None else layers
 
     # ── 1. Trace ──────────────────────────────────────────────────────────────
-    ct = causal_tracing.compute(model, prompts, subjects, positive_tokens, output_dir)
+    ct = tools("causal_tracing", prompts, subjects=subjects, positive_tokens=positive_tokens)
     result.steps["causal_tracing"] = ct
     subj = ct.data["groups"].index("subject_last")
     tracing = [ct.data["effects"]["mlp"][l][subj] for l in layers]
@@ -98,14 +96,13 @@ def run(
                            f"({max(tracing):.0%} of the probability restored).")
 
     # ── 2. Edit everywhere ────────────────────────────────────────────────────
-    per_layer = {}
-    for layer in layers:
-        r = rome.compute(model, prompts, subjects, positive_tokens, target_tokens, layer, output_dir,
-                         paraphrase_prompts=paraphrase_prompts,
-                         neighborhood_prompts=neighborhood_prompts,
-                         neighborhood_tokens=neighborhood_tokens)
-        per_layer[layer] = {k: r.data.get(k) for k in ("efficacy", "paraphrase", "specificity", "score")}
-    result.steps["rome_edits"] = InterpResult(data={"per_layer": {str(k): v for k, v in per_layer.items()}})
+    # Each fact is edited and scored on its own, and the weights restored, inside the tool.
+    edits = tools("rome_edits", prompts, subjects=subjects, positive_tokens=positive_tokens,
+                  target_tokens=target_tokens, paraphrase_prompts=paraphrase_prompts,
+                  neighborhood_prompts=neighborhood_prompts, neighborhood_tokens=neighborhood_tokens,
+                  layers=layers)
+    result.steps["rome_edits"] = edits
+    per_layer = {l: edits.data["per_layer"][str(l)] for l in layers}
     scores = [per_layer[l]["score"] for l in layers]
     best = layers[max(range(len(layers)), key=lambda i: scores[i])]
     rho = _spearman(tracing, scores)

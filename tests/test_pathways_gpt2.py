@@ -45,7 +45,6 @@ from seesaw.interp.causal_interventions import attribution_patching, head_patchi
 from seesaw.interp.circuit_finding import (  # noqa: E402
     circuit_tracing, edge_attribution_patching, path_patching,
 )
-from seesaw.interp.feature_extraction.sae import load_sae  # noqa: E402
 from seesaw.pathways import (  # noqa: E402
     attribute_audit, circuit_discovery, concept_direction, editing_comparison, factual_recall,
     feature_explain, model_diffing, probe_monitor, spurious_audit,
@@ -164,14 +163,12 @@ def test_irrelevant_attribute_is_not_flagged(gpt2, tmp_path):
 
 
 def test_sae_features_explain_ioi(gpt2, tmp_path):
-    sae = load_sae("gpt2-small-res-jb", "blocks.8.hook_resid_pre")
-    r = feature_explain.run(gpt2, sae, IOI, IO, S, tmp_path, search_neuronpedia=False)
+    r = feature_explain.run(gpt2, 8, IOI, IO, S, tmp_path, search_neuronpedia=False)
     assert r.verdict == "features_explain", r.to_markdown()
 
 
 def test_sae_layer_sweep_reports_each_layer(gpt2, tmp_path):
-    sae = load_sae("gpt2-small-res-jb", "blocks.8.hook_resid_pre")
-    r = feature_explain.run(gpt2, [sae], IOI, IO, S, tmp_path, search_neuronpedia=False)
+    r = feature_explain.run(gpt2, [8], IOI, IO, S, tmp_path, search_neuronpedia=False)
     assert r.verdict == "features_explain" and r.findings["layer"] == "blocks.8.hook_resid_pre"
 
 

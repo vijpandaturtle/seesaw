@@ -19,6 +19,7 @@ def run_edge_attribution_patching(
     positive_tokens: list[str],
     negative_tokens: list[str],
     top_k: int = 30,
+    ig_steps: int = 5,
     output_dir: Path = PLOTS_DIR,
 ) -> ExperimentResult:
     """Estimate every sender → receiver edge's patching effect (EAP-IG) and draw the top edges.
@@ -27,7 +28,7 @@ def run_edge_attribution_patching(
     Answers: "Which connections between heads carry the behaviour?"
     """
     result = _eap.compute(model, prompts, corrupted_prompts, positive_tokens, negative_tokens,
-                          output_dir, top_k=top_k)
+                          output_dir, top_k=top_k, ig_steps=ig_steps)
     return wrap(result, "Edge Attribution Patching", "edge_attribution_patching", model, prompts)
 
 

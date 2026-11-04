@@ -135,9 +135,11 @@ INPUTS: dict[str, str] = {
 }
 
 # feature_explain's SAEs: GPT-2 small residual SAEs at four layers, swept.
-# Layer 8 is the one the known-answer test uses.
+# Layer 8 is the one the known-answer test uses. The feature tools load the
+# SAE for each layer (find_sae picks SAE_RELEASE for GPT-2 small).
 SAE_RELEASE = "gpt2-small-res-jb"
-SAE_IDS = tuple(f"blocks.{layer}.hook_resid_pre" for layer in (4, 6, 8, 10))
+SAE_LAYERS = (4, 6, 8, 10)
+SAE_IDS = tuple(f"blocks.{layer}.hook_resid_pre" for layer in SAE_LAYERS)
 SAE_MODELS = ("gpt2", "gpt2-small")
 
 
@@ -421,26 +423,24 @@ def _tokenizer(model: str):
 
 
 def run_from_params(name: str, model_name: str, params: dict, output_dir: Path):
-    """Load the model (and SAE) and run the pathway. Imports torch."""
+    """Run the pathway by model name. Imports torch.
+
+    Every step goes through Lens's tool registry by model name (see
+    seesaw.pathways.tools): with SEESAW_LENS_BACKEND=modal each step runs on
+    the GPU app, as Lens's experiments do; otherwise in this process on
+    Lens's cached copy of the model.
+    """
     problems = validate(name, params, model_name)
     if problems:
         raise ValueError("; ".join(problems))
 
     import importlib
 
-    from transformer_lens import HookedTransformer
-
     module = importlib.import_module(f"seesaw.pathways.{name}")
-    model = HookedTransformer.from_pretrained(model_name)
     kwargs = {k: v for k, v in params.items() if v}
     if name == "feature_explain":
-        from seesaw.interp.feature_extraction.sae import load_sae
-
-        saes = [load_sae(SAE_RELEASE, sae_id) for sae_id in SAE_IDS]
-        return module.run(model, saes, output_dir=output_dir, **kwargs)
-    if name == "model_diffing":
-        kwargs["other_model"] = HookedTransformer.from_pretrained(kwargs["other_model"])
-    return module.run(model, output_dir=output_dir, **kwargs)
+        return module.run(model_name, list(SAE_LAYERS), output_dir=output_dir, **kwargs)
+    return module.run(model_name, output_dir=output_dir, **kwargs)
 
 
 def _is_str_list(value) -> bool:

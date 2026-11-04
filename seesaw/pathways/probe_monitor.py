@@ -29,9 +29,8 @@ from pathlib import Path
 
 from transformer_lens import HookedTransformer
 
-from seesaw.interp.probing import linear_probe, transfer
-
 from .result import PathwayResult
+from .tools import Tools
 
 # Training CV must beat shuffled labels by this much to count as signal.
 SIGNAL_MARGIN = 0.2
@@ -42,7 +41,7 @@ OVER_TEXT_MARGIN = 0.1
 
 
 def run(
-    model: HookedTransformer,
+    model: HookedTransformer | str,
     prompts: list[str],
     contrast_prompts: list[str],
     test_prompts: list[str],
@@ -52,7 +51,7 @@ def run(
     """Run the probe-monitor pathway.
 
     Args:
-        model: Loaded HookedTransformer.
+        model: Loaded HookedTransformer, or a model name (see pathways.tools).
         prompts: Training texts with the property to detect.
         contrast_prompts: Training texts without it.
         test_prompts: Held-out texts with it, ideally from a different distribution.
@@ -64,9 +63,10 @@ def run(
         baselines and a verdict.
     """
     result = PathwayResult(pathway="probe_monitor")
+    tools = Tools(model, output_dir)
 
     # ── 1. Train ──────────────────────────────────────────────────────────────
-    probe = linear_probe.compute(model, prompts, contrast_prompts, output_dir)
+    probe = tools("linear_probe", prompts, counterfactual_prompts=contrast_prompts)
     result.steps["linear_probe"] = probe
     train_acc, shuffled = probe.data["best_accuracy"], probe.data["shuffled_accuracy"]
     result.findings.update({"train_accuracy": train_acc, "shuffled_accuracy": shuffled})
@@ -77,7 +77,8 @@ def run(
         return result.stop("no_signal", f"the probe beats shuffled labels by under {SIGNAL_MARGIN:.0%}")
 
     # ── 2-3. Transfer and compare ─────────────────────────────────────────────
-    tr = transfer.compute(model, prompts, contrast_prompts, test_prompts, test_contrast_prompts, output_dir)
+    tr = tools("probe_transfer", prompts, counterfactual_prompts=contrast_prompts,
+               test_prompts=test_prompts, test_counterfactual_prompts=test_contrast_prompts)
     result.steps["probe_transfer"] = tr
     test_acc, layer = tr.data["test_accuracy"], tr.data["best_layer"]
     text_best = max(tr.data["embedding_accuracy"], tr.data["text_baseline_accuracy"])

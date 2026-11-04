@@ -28,9 +28,8 @@ from pathlib import Path
 
 from transformer_lens import HookedTransformer
 
-from seesaw.interp.model_diffing import diff
-
 from .result import PathwayResult
+from .tools import Tools
 
 # Mean KL (nats) below which the models count as behaving the same.
 KL_MIN = 0.01
@@ -39,16 +38,17 @@ LOCALIZED_MIN = 0.6
 
 
 def run(
-    model: HookedTransformer,
-    other_model: HookedTransformer,
+    model: HookedTransformer | str,
+    other_model: HookedTransformer | str,
     prompts: list[str],
     output_dir: Path,
 ) -> PathwayResult:
     """Run the model-diffing pathway.
 
     Args:
-        model: The base model.
-        other_model: The changed model, with the same tokenizer.
+        model: The base model, loaded or by name (see pathways.tools).
+        other_model: The changed model, with the same tokenizer: a model name, or
+            (when `model` is loaded) a loaded HookedTransformer.
         prompts: Prompts to compare them on.
         output_dir: Where every step saves its plots.
 
@@ -57,7 +57,7 @@ def run(
         favoured tokens, each component's share of the change, and a verdict.
     """
     result = PathwayResult(pathway="model_diffing")
-    d = diff.compute(model, other_model, prompts, output_dir)
+    d = Tools(model, output_dir)("model_diff", prompts, other_model=other_model)
     result.steps["model_diff"] = d
     mean_kl = d.data["mean_kl"]
     result.findings.update({"mean_kl": mean_kl, "most_changed": d.data["most_changed"][:5],
