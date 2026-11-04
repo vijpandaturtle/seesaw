@@ -64,7 +64,7 @@ def test_submit_can_name_a_pathway(jobs, launched, monkeypatch, capsys):
             "--runner", "queue")
     assert seesaw(monkeypatch, *argv) == 0
     [job] = jobs.list_jobs()
-    assert job.params_dict == {"pathway": "circuit_discovery"}
+    assert job.params_dict == {"pathway": "circuit_discovery", "models": [jobs.DEFAULT_MODEL]}
 
     assert seesaw(monkeypatch, "jobs", "submit", "q", "--pathway", "nope", "--runner", "queue") == 1
     assert "unknown pathway 'nope'" in capsys.readouterr().err
@@ -76,7 +76,7 @@ def test_submit_lets_scout_choose_unless_told_otherwise(jobs, launched, monkeypa
                           (("--pathway", "none", "--search"), {"search": True}),
                           (("--search",), {"pathway": "auto", "search": True})]:
         assert seesaw(monkeypatch, "jobs", "submit", "q", *extra, "--runner", "queue") == 0
-        assert jobs.list_jobs()[0].params_dict == params, extra
+        assert jobs.list_jobs()[0].params_dict == {**params, "models": [jobs.DEFAULT_MODEL]}, extra
 
 
 def test_rerun_queues_the_approved_inputs_at_lens(jobs, launched, monkeypatch, capsys, tmp_path):
@@ -208,3 +208,14 @@ def test_a_lens_stage_with_no_successes_fails_the_job(jobs, monkeypatch):
     after = jobs.get(job.id)
     assert (after.status, after.stage) == (jobs.FAILED, "lens")
     assert "no experiment succeeded" in after.error and "got 8 for 3 prompts" in after.error
+
+
+def test_submit_takes_several_models_in_order(jobs, launched, monkeypatch, capsys):
+    monkeypatch.setattr("seesaw.pathways.catalog._tokenizer", lambda model: None)
+    argv = ("jobs", "submit", "q", "--model", "Qwen/Qwen2.5-1.5B", "--model", "google/gemma-2-2b",
+            "--pathway", "model_diffing", "--other-model", "Qwen/Qwen2.5-1.5B-Instruct", "--runner", "queue")
+    assert seesaw(monkeypatch, *argv) == 0
+    [job] = jobs.list_jobs()
+    assert job.model == "Qwen/Qwen2.5-1.5B"
+    assert job.params_dict == {"pathway": "model_diffing", "other_model": "Qwen/Qwen2.5-1.5B-Instruct",
+                               "models": ["Qwen/Qwen2.5-1.5B", "google/gemma-2-2b"]}

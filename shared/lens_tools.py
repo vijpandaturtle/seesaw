@@ -147,18 +147,38 @@ LEVER_TOOLS: dict[str, LensTool] = {
 
 _CATALOGS: dict[str, dict[str, LensTool]] = {"seesaw": LENS_TOOLS, "lever": LEVER_TOOLS}
 
-# The model a job targets when none is named: the one every tool covers,
-# feature_explain and circuit_tracing included (Gemma Scope SAEs, Neuronpedia
-# graphs). Gated on Hugging Face, so the GPU app needs an HF token.
+# The model a job runs on when the user names none (CLI without --model, old
+# rows): the one every tool covers, feature_explain and circuit_tracing
+# included. Gated on Hugging Face, so the GPU app needs an HF token.
 DEFAULT_MODEL = "google/gemma-2-2b"
+
+# The models Lens runs (TransformerLens names), with what each can and can't
+# do. The dashboard offers the same list. GPU sizes are shared/gpus.py's.
+MODELS: dict[str, str] = {
+    "google/gemma-2-2b": "every tool works on it: SAE tools and feature_explain (Gemma Scope, every "
+                         "layer), circuit_tracing on its own graphs; gated (needs the HF token)",
+    "meta-llama/Llama-3.2-1B": "no published SAEs (no SAE tools, no feature_explain); gated",
+    "meta-llama/Llama-3.2-3B": "no published SAEs; gated",
+    "Qwen/Qwen2.5-0.5B": "small and fast; no published SAEs; open",
+    "Qwen/Qwen2.5-1.5B": "no published SAEs; open",
+    "Qwen/Qwen2.5-3B": "no published SAEs; open",
+    "Qwen/Qwen2.5-7B": "runs on an A100 (costs about 3x more per second); no published SAEs; open",
+    "Qwen/Qwen2.5-7B-Instruct": "the instruction-tuned 7B: SAE tools and feature_explain (every 4th "
+                                "layer); A100; open",
+}
+
+
+def models_brief() -> str:
+    """The supported models as a bullet list, for Scout's prompts."""
+    return "\n".join(f"- `{m}`: {note}" for m, note in MODELS.items())
 
 # What Scout and Lens's planner are told about models and inputs, per backend.
 PLANNING_NOTES: dict[str, str] = {
     "seesaw": (
-        "Experiments run with TransformerLens on Modal GPUs. Target google/gemma-2-2b (the default: "
-        "every tool works on it), meta-llama/Llama-3.2-1B or -3B, or Qwen/Qwen2.5-0.5B to -7B. The SAE "
-        "tools need published SAEs: Gemma-2-2B (Gemma Scope, every layer) and Qwen/Qwen2.5-7B-Instruct "
-        "(every 4th layer) only. circuit_tracing reads Neuronpedia graphs for gemma-2-2b and the models "
+        "Experiments run with TransformerLens on Modal GPUs, on the models the user chose for the job "
+        "(each experiment names one of them, written in full). What each model supports: "
+        + "; ".join(f"{m}: {note}" for m, note in MODELS.items()) + ". "
+        "The SAE tools need published SAEs, so only google/gemma-2-2b and Qwen/Qwen2.5-7B-Instruct. circuit_tracing reads Neuronpedia graphs for gemma-2-2b and the models "
         "it lists. Llama, Qwen and Gemma use grouped-query attention: heads in a group share keys and "
         "values, so use kv_head_patching for keys and values."
     ),

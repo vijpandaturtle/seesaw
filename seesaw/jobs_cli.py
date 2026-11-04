@@ -1,7 +1,7 @@
 """`seesaw jobs …` — submit and drive jobs in the shared job store from a terminal.
 
-    seesaw jobs submit "<question>" [--pathway P|auto|none] [--search] [--model M] [--auto-approve] [--follow]
-    seesaw jobs rerun <id> [--model M] [--auto-approve] [--follow]
+    seesaw jobs submit "<question>" [--pathway P|auto|none] [--search] [--model M ...] [--other-model M] [--auto-approve] [--follow]
+    seesaw jobs rerun <id> [--model M ...] [--auto-approve] [--follow]
     seesaw jobs list [--limit N] [--json]
     seesaw jobs show <id> [--json]
     seesaw jobs approve <id> [--follow]
@@ -244,7 +244,8 @@ def _approve(job_id: str, runner: str) -> bool:
 
 def cmd_submit(args) -> int:
     try:
-        job = _jobs().create(args.question, model=args.model, auto_approve=args.auto_approve,
+        job = _jobs().create(args.question, model=args.model or [DEFAULT_MODEL],
+                             auto_approve=args.auto_approve,
                              params=_submit_params(args))
     except ValueError as exc:
         print(exc, file=sys.stderr)
@@ -257,12 +258,14 @@ def cmd_submit(args) -> int:
 
 
 def _submit_params(args) -> dict | None:
-    """--pathway (a name, auto, or none) and --search, as a job's params."""
+    """--pathway (a name, auto, or none), --search and --other-model, as a job's params."""
     params = {}
     if args.pathway and args.pathway != "none":
         params["pathway"] = args.pathway
     if args.search:
         params["search"] = True
+    if getattr(args, "other_model", None):
+        params["other_model"] = args.other_model
     return params or None
 
 
@@ -369,7 +372,9 @@ def add_parser(sub) -> None:
                         "that one, Scout chooses its inputs; none: no pathway, Scout plans freely")
     p.add_argument("--search", action="store_true",
                    help="let Scout search arXiv and the web while planning (off by default)")
-    p.add_argument("--model", default=DEFAULT_MODEL, help=f"model Lens should target (default: {DEFAULT_MODEL})")
+    p.add_argument("--model", action="append",
+                   help=f"a model to run on; repeat for several, in order (default: {DEFAULT_MODEL})")
+    p.add_argument("--other-model", help="model_diffing only: the changed model to compare the first with")
     p.add_argument("--auto-approve", action="store_true", help="run all stages without approval gates")
     runner_arg(p)
     follow_arg(p)
@@ -399,7 +404,8 @@ def add_parser(sub) -> None:
 
     p = js.add_parser("rerun", help="run a job's pathway again on its approved inputs, from Lens")
     p.add_argument("job_id")
-    p.add_argument("--model", help="run on this model instead (default: the job's own)")
+    p.add_argument("--model", action="append",
+                   help="run on this model instead; repeat for several (default: the job's own models)")
     p.add_argument("--auto-approve", action="store_true", help="go on to Quill without its gate")
     runner_arg(p)
     follow_arg(p)

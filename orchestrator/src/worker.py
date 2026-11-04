@@ -53,10 +53,12 @@ from dotenv import load_dotenv
 from shared.db import events, jobs
 from shared.db.jobs import Job
 
-# Lens honours the plan's stated model, so the UI's choice is appended as
-# an explicit override rather than hoping Scout wrote the right one.
-_MODEL_OVERRIDE = (
-    "\n\n**Target Model (required, overrides any other model mentioned above)**: {model}\n"
+# Lens honours the plan's stated models, so the user's choice is appended as
+# an explicit rule rather than hoping Scout kept to it.
+_MODELS_NOTE = (
+    "\n\n**Target Models (required, override any other model mentioned above)**: run every "
+    "experiment on one of {models}, written exactly so. An experiment the plan puts on any "
+    "other model runs on {first}.\n"
 )
 
 
@@ -64,7 +66,7 @@ _MODEL_OVERRIDE = (
 # tells it not to redo the pathway and what its own experiments are for.
 _PATHWAY_DONE = (
     "\n\n**Pathway already run**: the `{name}` pathway (version {version}) has already been run "
-    "on the approved inputs; its verdict was `{verdict}`. Do not re-run it, and do not use its "
+    "on the approved inputs; its verdict was {verdict}. Do not re-run it, and do not use its "
     "prompts for an experiment unless the plan lists that experiment on its own. The experiments "
     "you run are extras that add to that result.\n"
 )
@@ -78,27 +80,34 @@ def run_scout_stage(job: Job) -> None:
     search = bool(params.get("search"))
     # A retry under "auto" chooses again, rather than inheriting the last choice.
     name = params.get("pathway_request") or params.get("pathway")
-    if not name:
-        plan_path = run_scout(job.question, thread_id=f"job-{job.id}-scout",
-                              output_dir=jobs.job_dir(job.id), search=search)
-        jobs.update(job.id, plan_path=str(plan_path))
-        return
 
     from pathlib import Path
 
     from seesaw.pathways import catalog
+
+    models, other = job.models, params.get("other_model")
+    if not name:
+        plan_path = run_scout(job.question, thread_id=f"job-{job.id}-scout",
+                              output_dir=jobs.job_dir(job.id), search=search,
+                              brief=catalog.models_brief(models),
+                              check=lambda path: catalog.plan_model_errors(path.read_text(), models))
+        jobs.update(job.id, plan_path=str(plan_path))
+        return
 
     if name == catalog.AUTO:
         _scout_chooses(job, params, search)
         return
 
     def check(path: Path) -> list[str]:
-        return catalog.extract_inputs(name, path.read_text(), job.model)[1]
+        text = path.read_text()
+        return (catalog.extract_inputs(name, text, models, other)[1]
+                + catalog.plan_model_errors(text, models))
 
     plan_path = run_scout(job.question, thread_id=f"job-{job.id}-scout",
                           output_dir=jobs.job_dir(job.id), search=search,
-                          brief=catalog.scout_brief(name, job.model), check=check)
-    inputs, errors = catalog.extract_inputs(name, plan_path.read_text(), job.model)
+                          brief=catalog.scout_brief(name, models, other) + "\n\n"
+                          + catalog.models_brief(models), check=check)
+    inputs, errors = catalog.extract_inputs(name, plan_path.read_text(), models, other)
     # Inputs from an earlier Scout run don't belong to this plan.
     params.pop("pathway_params", None)
     if errors:
@@ -118,13 +127,17 @@ def _scout_chooses(job: Job, params: dict, search: bool) -> None:
 
     from .clients.scout_client import MAX_REVISIONS, run_scout
 
+    models, other = job.models, params.get("other_model")
+
     def check(path: Path) -> list[str]:
-        return catalog.extract_choice(path.read_text(), job.model)[3]
+        text = path.read_text()
+        return catalog.extract_choice(text, models, other)[3] + catalog.plan_model_errors(text, models)
 
     plan_path = run_scout(job.question, thread_id=f"job-{job.id}-scout",
                           output_dir=jobs.job_dir(job.id), search=search,
-                          brief=catalog.choice_brief(job.model), check=check)
-    name, inputs, why, errors = catalog.extract_choice(plan_path.read_text(), job.model)
+                          brief=catalog.choice_brief(models, other) + "\n\n" + catalog.models_brief(models),
+                          check=check)
+    name, inputs, why, errors = catalog.extract_choice(plan_path.read_text(), models, other)
     # Whatever an earlier Scout run chose doesn't belong to this plan.
     for key in ("pathway", "pathway_params", "pathway_why"):
         params.pop(key, None)
@@ -159,32 +172,41 @@ def run_lens_stage(job: Job) -> None:
         # Lens gets the plan without the pathway's inputs (or Scout's choice of
         # none), so it can't take them for one more experiment.
         plan_text = catalog.without_inputs(plan_text)
-    plan_text += _MODEL_OVERRIDE.format(model=job.model)
+    # Read now, not at Scout: the user may have changed them at the gate.
+    models = job.models
+    plan_text += _MODELS_NOTE.format(models=", ".join(models), first=models[0])
 
-    # A pathway job runs its pathway first, on exactly the approved inputs.
-    pathway = None
+    # A pathway job runs its pathway first, on exactly the approved inputs:
+    # once per model (model_diffing once: the first model against other_model).
+    pathways: list[dict] = []
     if params.get("pathway"):
         if "pathway_params" not in params:
             raise RuntimeError("this job's pathway has no approved inputs — "
                                "Scout stage did not save them")
         from seesaw.pathways import catalog
 
-        # A rerun may have moved the inputs to another model; refuse them here,
-        # with the reason, rather than inside the pathway.
-        problems = catalog.check_inputs(params["pathway"], params["pathway_params"], job.model)
+        name, inputs = params["pathway"], params["pathway_params"]
+        if name == "model_diffing" and params.get("other_model"):
+            inputs = {**inputs, "other_model": params["other_model"]}
+        # A rerun or the gate may have changed the models; refuse inputs that
+        # can't run on them here, with the reason, rather than inside the pathway.
+        problems = catalog.check_models(name, inputs, models)
         if problems:
-            raise RuntimeError(f"the approved {params['pathway']} inputs can't run on "
-                               f"{job.model}: " + "; ".join(problems))
-        pathway = _run_pathway_once(job, params["pathway"], params["pathway_params"])
-        plan_text += _PATHWAY_DONE.format(name=pathway["pathway"], version=pathway["version"],
-                                          verdict=pathway["verdict"])
+            raise RuntimeError(f"the approved {name} inputs can't run on "
+                               f"{', '.join(models)}: " + "; ".join(problems))
+        runs_on = models[:1] if name == "model_diffing" else models
+        pathways = [_run_pathway_once(job, name, inputs, model, many=len(runs_on) > 1)
+                    for model in runs_on]
+        verdicts = (f"`{pathways[0]['verdict']}`" if len(pathways) == 1 else
+                    ", ".join(f"`{p['verdict']}` on {p['model']}" for p in pathways))
+        plan_text += _PATHWAY_DONE.format(name=name, version=pathways[0]["version"], verdict=verdicts)
 
     replay = _replay_of(job) if params.get("rerun_of") else None
     if replay is not None and not replay["experiments"]:
         # The source ran no extras: nothing for Lens (or its LLM) to do.
         bundle_path = jobs.job_dir(job.id) / "results_bundle.json"
         bundle_path.parent.mkdir(parents=True, exist_ok=True)
-        bundle = {"research_question": replay["research_question"], "model_name": job.model,
+        bundle = {"research_question": replay["research_question"], "model_name": models[0],
                   "results": [], "n_total": 0, "n_success": 0, "n_failed": 0}
     else:
         bundle, bundle_path = run_lens(
@@ -195,15 +217,18 @@ def run_lens_stage(job: Job) -> None:
         )
     if replay is not None:
         bundle["replayed_from"] = params["rerun_of"]
-    if pathway is not None:
-        bundle = _with_pathway(bundle, pathway)
-    if pathway is not None or replay is not None:
+    if pathways:
+        bundle = _with_pathways(bundle, pathways)
+    if pathways or replay is not None:
         bundle_path.write_text(json.dumps(bundle, indent=2, default=str))
-    jobs.update(job.id, bundle_path=str(bundle_path))
+    # What actually ran, beside the user's choice (params["models"], never changed here).
+    ran = [r.get("model_name") for r in bundle.get("results", []) if r.get("model_name")]
+    params = {**jobs.get(job.id).params_dict, "models_run": list(dict.fromkeys(ran))}
+    jobs.update(job.id, bundle_path=str(bundle_path), params=json.dumps(params))
     print(f"   {bundle['n_success']}/{bundle['n_total']} experiments succeeded")
     # Nothing for Quill to critique: fail here, where retry re-runs Lens,
     # rather than parking the job at a gate in front of an empty bundle.
-    # (A pathway job always has the pathway's result to critique.)
+    # (A pathway job always has the pathway's results to critique.)
     if bundle["n_total"] and not bundle["n_success"]:
         first = next((r.get("error") for r in bundle.get("results", []) if r.get("error")), None)
         raise RuntimeError(f"no experiment succeeded ({bundle['n_total']} failed)"
@@ -243,38 +268,48 @@ def _replay_of(job: Job) -> dict | None:
         return None
 
     bundle = json.loads(path.read_text())
+    # Each experiment on the model it ran on, when the rerun keeps that model;
+    # on every one of the rerun's models when it doesn't.
+    models = job.models
     experiments = [
-        {"name": r["name"], "tool": r["tool"], "model_name": job.model,
+        {"name": r["name"], "tool": r["tool"], "model_name": model,
          "prompts": r["prompts"], "tool_kwargs": r.get("tool_kwargs") or {}}
         for r in bundle.get("results", []) if r.get("role") != "pathway"
+        for model in ([r["model_name"]] if r.get("model_name") in models else models)
     ]
     print(f"   replaying {len(experiments)} experiment(s) from job {source_id}")
     events.emit(events.NOTE, "replay",
                 summary=f"replaying {len(experiments)} experiment(s) from job {source_id} "
-                        f"on {job.model}, as they ran",
+                        f"on {', '.join(models)}, as they ran",
                 data={"source": source_id, "experiments": experiments})
     return {"research_question": bundle.get("research_question") or job.question,
-            "model_name": job.model, "experiments": experiments}
+            "model_name": models[0], "experiments": experiments}
 
 
-def _run_pathway(job: Job, name: str, params: dict) -> dict:
-    """Run a pathway into the job's pathway/ folder; return what it saved.
+def _pathway_dir(job: Job, model: str, many: bool):
+    """pathway/, or pathway/<model>/ when the pathway runs on several models."""
+    out = jobs.job_dir(job.id) / "pathway"
+    return out / model.replace("/", "__") if many else out
+
+
+def _run_pathway(job: Job, name: str, params: dict, model: str, many: bool = False) -> dict:
+    """Run a pathway on one model into the job's pathway folder; return what it saved.
 
     pathway/result.json carries the name, version, model and inputs next to
     the verdict, so a reader (or a later retry) knows exactly what produced it.
     """
     from seesaw.pathways import catalog
 
-    out = jobs.job_dir(job.id) / "pathway"
+    out = _pathway_dir(job, model, many)
     out.mkdir(parents=True, exist_ok=True)
 
     from seesaw.pathways.result import listening
 
-    print(f"   pathway {name} on {job.model}")
+    print(f"   pathway {name} on {model}")
     with events.span(events.PATHWAY, name, data={"version": catalog.version(name),
-                                                 "model": job.model, "params": params}) as s, \
+                                                 "model": model, "params": params}) as s, \
             listening(_record_step):
-        result = catalog.run_from_params(name, job.model, params, out)
+        result = catalog.run_from_params(name, model, params, out)
         s.summary = f"verdict: {result.verdict}" + (
             f" (stopped early: {result.stopped_early})" if result.stopped_early else "")
         s.data.update(verdict=result.verdict, evidence=result.evidence)
@@ -283,7 +318,7 @@ def _run_pathway(job: Job, name: str, params: dict) -> dict:
     saved = {
         "pathway": result.pathway,
         "version": catalog.version(name),
-        "model": job.model,
+        "model": model,
         "params": params,
         "verdict": result.verdict,
         "evidence": result.evidence,
@@ -299,7 +334,7 @@ def _run_pathway(job: Job, name: str, params: dict) -> dict:
     return json.loads(text)
 
 
-def _run_pathway_once(job: Job, name: str, params: dict) -> dict:
+def _run_pathway_once(job: Job, name: str, params: dict, model: str, many: bool = False) -> dict:
     """The pathway's saved result when it matches, else a fresh run.
 
     A retried Lens stage would otherwise recompute a deterministic result it
@@ -308,16 +343,16 @@ def _run_pathway_once(job: Job, name: str, params: dict) -> dict:
     """
     from seesaw.pathways import catalog
 
-    path = jobs.job_dir(job.id) / "pathway" / "result.json"
+    path = _pathway_dir(job, model, many) / "result.json"
     if path.exists():
         saved = json.loads(path.read_text())
         if (saved.get("pathway"), saved.get("version"), saved.get("model"), saved.get("params")) == (
-                name, catalog.version(name), job.model, params):
-            print(f"   reusing saved {name} result (verdict: {saved['verdict']})")
+                name, catalog.version(name), model, params):
+            print(f"   reusing saved {name} result on {model} (verdict: {saved['verdict']})")
             events.emit(events.PATHWAY, name, summary=f"reused the saved result "
                         f"(verdict: {saved['verdict']}): same pathway, version, model and inputs")
             return saved
-    return _run_pathway(job, name, params)
+    return _run_pathway(job, name, params, model, many)
 
 
 def _record_step(pathway: str, step: str, result, seconds: float) -> None:
@@ -332,14 +367,32 @@ def _record_step(pathway: str, step: str, result, seconds: float) -> None:
                 data={"pathway": pathway, "data": data, "plot_paths": plots})
 
 
-def _with_pathway(bundle: dict, pathway: dict) -> dict:
-    """Put the pathway's result first in Lens's bundle, as the primary evidence.
+def _with_pathways(bundle: dict, pathways: list[dict]) -> dict:
+    """Put the pathway's results (one per model) first in Lens's bundle, as the primary evidence.
 
-    It takes the shape of a Lens experiment result so Quill reads it like any
-    other, with `role` telling the two apart: "pathway" for this one, "extra"
-    for everything Lens chose to run.
+    bundle["pathways"] lists them all; bundle["pathway"] is the first, for
+    readers that know only one.
     """
-    entry = {
+    entries = [_pathway_entry(p) for p in pathways]
+    results = entries + [{**r, "role": "extra"} for r in bundle.get("results", [])]
+    return {
+        **bundle,
+        "pathway": pathways[0],
+        "pathways": pathways,
+        "results": results,
+        "n_total": len(results),
+        "n_success": sum(1 for r in results if r["status"] == "success"),
+        "n_failed": sum(1 for r in results if r["status"] != "success"),
+    }
+
+
+def _pathway_entry(pathway: dict) -> dict:
+    """One pathway result, in the shape of a Lens experiment result.
+
+    Quill reads it like any other, with `role` telling the two apart:
+    "pathway" for this one, "extra" for everything Lens chose to run.
+    """
+    return {
         "name": f"pathway:{pathway['pathway']}",
         "tool": f"{pathway['pathway']}@v{pathway['version']}",
         "role": "pathway",
@@ -352,15 +405,6 @@ def _with_pathway(bundle: dict, pathway: dict) -> dict:
         "status": "success",
         "error": None,
         "tool_kwargs": pathway["params"],
-    }
-    results = [entry] + [{**r, "role": "extra"} for r in bundle.get("results", [])]
-    return {
-        **bundle,
-        "pathway": pathway,
-        "results": results,
-        "n_total": len(results),
-        "n_success": sum(1 for r in results if r["status"] == "success"),
-        "n_failed": sum(1 for r in results if r["status"] != "success"),
     }
 
 
