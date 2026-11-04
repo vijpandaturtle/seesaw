@@ -32,7 +32,14 @@ from seesaw.interp.metrics import logit_diff, recovery  # noqa: E402
 from seesaw.interp.model_editing import directional_ablation  # noqa: E402
 from seesaw.interp.probing import linear_probe  # noqa: E402
 from seesaw.interp.steering import feature_clamping, steering_vector  # noqa: E402
-from seesaw.pathways import attribute_audit, circuit_discovery, feature_explain  # noqa: E402
+from seesaw.interp.causal_interventions import causal_tracing, mlp_patching  # noqa: E402
+from seesaw.interp.model_diffing import diff  # noqa: E402
+from seesaw.interp.model_editing import leace, rome  # noqa: E402
+from seesaw.interp.probing import transfer  # noqa: E402
+from seesaw.pathways import (  # noqa: E402
+    attribute_audit, circuit_discovery, concept_direction, editing_comparison, factual_recall,
+    feature_explain, model_diffing, probe_monitor, spurious_audit,
+)
 from seesaw.pathways.result import PathwayResult  # noqa: E402
 
 PROMPTS   = ["When Mary and John went to the store, John gave a drink to",
@@ -75,6 +82,27 @@ class FakeSAE:
 
     def encode(self, x):
         return x
+
+
+class FakeSAE0(FakeSAE):
+    """The same identity 'SAE', on layer 0, for sweeping layers."""
+
+    class _Cfg:
+        class metadata:  # noqa: N801
+            hook_name = "blocks.0.hook_resid_pre"
+            neuronpedia_id = None
+
+    cfg = _Cfg()
+
+
+# Six aligned pairs: enough for concept_direction to hold half out.
+_NAMES = [("Mary", "John"), ("Alice", "Bob"), ("Sarah", "Tom"), ("Anna", "James"),
+          ("Kate", "Mark"), ("Lisa", "David")]
+PAIRS_A = [f"When {a} and {b} went to the store, {b} gave a drink to" for a, b in _NAMES]
+PAIRS_B = [f"When {a} and {b} went to the store, {a} gave a drink to" for a, b in _NAMES]
+PAIR_POS, PAIR_NEG = [f" {a}" for a, _ in _NAMES], [f" {b}" for _, b in _NAMES]
+CONCEPT_VERDICTS = {"uses_direction", "partly_uses_direction", "encoded_not_used", "not_encoded",
+                    "inconclusive"}
 
 
 # ── helpers and metrics ──────────────────────────────────────────────────────
@@ -324,7 +352,7 @@ def test_pathways_run_end_to_end(model, tmp_path, monkeypatch):
     # Random weights rarely clear the effect thresholds, so lower them: this
     # checks the plumbing, not the science.
     monkeypatch.setattr(circuit_discovery, "EFFECT_MIN", -1e9)
-    monkeypatch.setattr(attribute_audit, "EFFECT_MIN", 0.0)
+    monkeypatch.setattr(concept_direction, "EFFECT_MIN", 0.0)
     monkeypatch.setattr(feature_explain, "EFFECT_MIN", -1e9)
 
     cd = circuit_discovery.run(model, PROMPTS, POS, NEG, tmp_path / "cd", corrupted_prompts=CORRUPTED)
@@ -333,9 +361,130 @@ def test_pathways_run_end_to_end(model, tmp_path, monkeypatch):
     assert not set(roles["confirmed_writers"]) & set(roles["writes_but_redundant"])
     assert set(roles["necessary_but_indirect"]) <= set(roles["confirmed_heads"])
 
-    aa = attribute_audit.run(model, PROMPTS, CORRUPTED, POS, NEG, tmp_path / "aa")
-    assert aa.verdict in {"uses_attribute", "encoded_not_causal", "inconclusive"}
-    assert list(aa.steps)[0] == "counterfactual"
+    cd_ = concept_direction.run(model, PAIRS_A, PAIRS_B, PAIR_POS, PAIR_NEG, tmp_path / "cdir")
+    assert cd_.verdict in CONCEPT_VERDICTS
+    assert list(cd_.steps)[0] == "counterfactual" and "bake_check" in cd_.steps
+    assert cd_.findings["split"] == {"fit": 3, "held_out": 3}
+    # The old name runs the same pathway, recorded under its own name.
+    aa = attribute_audit.run(model, PAIRS_A, PAIRS_B, PAIR_POS, PAIR_NEG, tmp_path / "aa")
+    assert aa.pathway == "attribute_audit" and aa.verdict in CONCEPT_VERDICTS
+    # Too few pairs to hold any out is a stop, not a verdict drawn from in-sample numbers.
+    short = concept_direction.run(model, PROMPTS, CORRUPTED, POS, NEG, tmp_path / "short")
+    assert short.verdict == "inconclusive" and short.stopped_early
 
     fe = feature_explain.run(model, FakeSAE(model.cfg.d_model), PROMPTS, POS, NEG, tmp_path / "fe")
     assert fe.verdict in {"features_explain", "partial", "not_explained"} or fe.stopped_early
+    sweep = feature_explain.run(model, [FakeSAE(model.cfg.d_model), FakeSAE0(model.cfg.d_model)],
+                                PROMPTS, POS, NEG, tmp_path / "fe2", search_neuronpedia=False)
+    assert sweep.stopped_early or set(sweep.findings["explained_by_layer"]) <= {
+        "blocks.1.hook_resid_pre", "blocks.0.hook_resid_pre"}
+    assert "confirmed_mlps" in cd.findings
+
+
+# ── tools behind the newer pathways ──────────────────────────────────────────
+FACTS = ["The Eiffel Tower is located in the city of", "The Colosseum is located in the city of"]
+SUBJECTS = ["The Eiffel Tower", "The Colosseum"]
+ANSWERS, NEW = [" Paris", " Rome"], [" London", " Berlin"]
+
+
+def test_restoring_the_final_residual_restores_everything(model, tmp_path):
+    """Restoring the clean last-layer residual at the final token is the clean run's output."""
+    r = causal_tracing.compute(model, FACTS, SUBJECTS, ANSWERS, tmp_path, n_noise=2)
+    final = r.data["groups"].index("final")
+    assert r.data["effects"]["resid"][model.cfg.n_layers - 1][final] == pytest.approx(1.0, abs=1e-4)
+
+
+def test_subject_span_finds_the_subject_tokens(model):
+    start, end = causal_tracing.subject_span(model, FACTS[0], SUBJECTS[0])
+    assert model.to_string(model.to_tokens(FACTS[0])[0, start:end]) == SUBJECTS[0]
+
+
+def test_rome_update_is_rank_one_and_restored(model):
+    # Layer 0: an edit at the last layer can't reach the answer (nothing reads it after), so it's zero.
+    before = model.blocks[0].mlp.W_out.detach().clone()
+    update = rome.edit_weights(model, 0, FACTS[0], SUBJECTS[0], NEW[0], steps=3)
+    assert torch.linalg.matrix_rank(update.float()).item() == 1
+    with rome.applied(model, 0, update):
+        assert not torch.equal(model.blocks[0].mlp.W_out, before)
+    assert torch.equal(model.blocks[0].mlp.W_out, before)
+
+
+def test_rome_scores_have_the_documented_shape(model, tmp_path):
+    r = rome.compute(model, FACTS, SUBJECTS, ANSWERS, NEW, 0, tmp_path, paraphrase_prompts=FACTS)
+    assert set(r.data) >= {"efficacy", "paraphrase", "score", "per_fact"}
+    assert 0 <= r.data["score"] <= 1
+
+
+def test_leace_leaves_no_linear_correlation_with_the_label():
+    """Cov(x', z) = 0 exactly, shrinkage or not: what makes the attribute linearly unreadable."""
+    gen = torch.Generator().manual_seed(0)
+    x = torch.randn(20, 8, generator=gen)
+    z = (torch.arange(20) % 2).float()
+    x[:, 0] += 3 * z
+    mu, p = leace.fit(x, z, shrinkage=0.5)
+    erased = x - (x - mu) @ p.T
+    cov = (erased - erased.mean(0)).T @ (z - z.mean()) / len(z)
+    assert cov.abs().max().item() < 1e-4
+
+
+def test_baked_weights_match_the_hooks(model):
+    direction = torch.randn(model.cfg.d_model).tolist()
+    tokens = model.to_tokens(PROMPTS)
+    unit = torch.tensor(direction) / torch.tensor(direction).norm()
+    with torch.no_grad(), model.hooks(fwd_hooks=directional_ablation._hooks(model, unit)):
+        hooked = model(tokens)
+    with torch.no_grad(), directional_ablation.orthogonalized(model, direction):
+        baked = model(tokens)
+    assert torch.allclose(hooked, baked, atol=1e-4)
+
+
+def test_probe_transfer_reports_its_baselines(model, tmp_path):
+    a = ["I love this", "This is great", "Wonderful day", "So happy now"]
+    b = ["I hate this", "This is awful", "Terrible day", "So sad now"]
+    r = transfer.compute(model, a, b, a[:2], b[:2], tmp_path, n_shuffles=2)
+    for key in ("test_accuracy", "shuffled_accuracy", "embedding_accuracy", "text_baseline_accuracy"):
+        assert 0.0 <= r.data[key] <= 1.0
+
+
+def test_a_model_matches_itself(model, tmp_path):
+    assert diff.compute(model, model, PROMPTS, tmp_path).data["mean_kl"] == pytest.approx(0.0, abs=1e-6)
+
+
+def test_a_change_planted_in_one_block_is_found_there(model, tmp_path):
+    import copy
+    other = copy.deepcopy(model)
+    with torch.no_grad():
+        other.blocks[1].mlp.W_out.add_(torch.randn_like(other.blocks[1].mlp.W_out))
+    closed = diff.compute(model, other, PROMPTS, tmp_path).data["kl_closed_by_component"]
+    assert max(closed, key=closed.get) == "block1" and closed["block1"] == pytest.approx(1.0, abs=1e-4)
+    assert model_diffing.run(model, other, PROMPTS, tmp_path).verdict == "localized"
+    assert model_diffing.run(model, model, PROMPTS, tmp_path).verdict == "no_change"
+
+
+def test_mlp_patching_with_no_gap_recovers_nothing(model, tmp_path):
+    r = mlp_patching.compute(model, PROMPTS, PROMPTS, POS, NEG, tmp_path)
+    assert r.data["per_layer"] == {"0": 0.0, "1": 0.0}     # clean == corrupt: no gap to recover
+
+
+def test_newer_pathways_run_end_to_end(model, tmp_path, monkeypatch):
+    # Random weights rarely clear the thresholds; this checks the plumbing, not the science.
+    monkeypatch.setattr(spurious_audit, "TASK_MIN", -1e9)
+    monkeypatch.setattr(spurious_audit, "RELIANCE_MIN", 0.0)
+    monkeypatch.setattr(factual_recall, "P_MIN", 0.0)
+    monkeypatch.setattr(factual_recall, "CORRUPTION_MIN", -1e9)
+
+    pm = probe_monitor.run(model, PAIRS_A, PAIRS_B, PAIRS_A[:2], PAIRS_B[:2], tmp_path / "pm")
+    assert pm.verdict in {"no_signal", "does_not_transfer", "lexical_only", "monitor_works"}
+
+    sa = spurious_audit.run(model, PAIRS_A, PAIRS_B, PAIR_POS, PAIR_NEG, tmp_path / "sa")
+    assert sa.verdict in {"removable", "entangled", "not_removed"}
+    assert "leace_erasure" in sa.steps
+
+    fr = factual_recall.run(model, FACTS, SUBJECTS, ANSWERS, tmp_path / "fr")
+    # Random weights give the answer ~1/vocab probability, which noise can't lower.
+    assert fr.verdict in {"subject_mlp_recall", "late_site", "not_localized", "corruption_too_weak"}
+
+    ec = editing_comparison.run(model, FACTS, SUBJECTS, ANSWERS, NEW, FACTS, FACTS[::-1],
+                                ANSWERS[::-1], tmp_path / "ec")
+    assert ec.verdict in {"edits_fail", "tracing_predicts_editing", "tracing_does_not_predict"}
+    assert set(ec.findings["edit_scores"]) == {"0", "1"}

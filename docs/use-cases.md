@@ -10,15 +10,23 @@ it looks like.
 | Purpose | The question you're asking | Pathway |
 |---|---|---|
 | [Understand a capability](#understand-a-capability) | How does the model do X? | `circuit_discovery` |
-| [Audit a reliance](#audit-a-reliance) | Does the model use attribute X, and does removing it remove the behaviour? | `attribute_audit` |
+| [Find and steer a concept](#find-and-steer-a-concept) | Is concept X a direction the model uses? Can I remove or steer it safely? | `concept_direction` (`attribute_audit` is its older name) |
+| [Build a detector](#build-a-detector) | Would a probe on the activations flag X on new texts, better than the words alone? | `probe_monitor` |
+| [Audit a spurious dependence](#audit-a-spurious-dependence) | Does the answer depend on something it shouldn't? Can that be erased without breaking the task? | `spurious_audit` |
+| [Locate a fact](#locate-a-fact) | Where does the model retrieve a fact? | `factual_recall` |
+| [Edit a fact](#edit-a-fact) | Is the layer where a fact is traced the best layer to edit it? | `editing_comparison` |
 | [Explain an output](#explain-an-output) | Why did it say X here? Which features drive it? | `feature_explain` (gpt2 only) |
+| [Diff two models](#diff-two-models) | What did a fine-tune change, and in which weights? | `model_diffing` |
 | [Compare models](#reproducing-a-result) | Does model B do X the same way as model A? | any of the above, rerun on the other model |
-| [Not runnable yet](#not-runnable-yet) | Debug a failure, replicate a claim, steer | none yet |
+| [Not runnable yet](#not-runnable-yet) | Debug a failure, replicate a claim, attribute to the context | none yet |
 
-Every pathway scores one answer token against one distractor token per prompt. A good question
-therefore has an answer the model gives as **a single next token**: `" Mary"` vs `" John"`,
+Most pathways score one answer token against one distractor token per prompt. A good question for
+them has an answer the model gives as **a single next token**: `" Mary"` vs `" John"`,
 `" she"` vs `" he"`. If you can't name the correct token and the wrong one, narrow the question
-until you can.
+until you can. `probe_monitor` and `model_diffing` take texts, not answer tokens.
+
+Every step of every pathway is labelled with how strong its evidence is (Correlational, Estimate
+or Causal) and whether its controls ran; see [`shared/evidence.py`](../shared/evidence.py).
 
 ★ marks a question whose answer is already known on GPT-2 small, checked in
 [`tests/test_pathways_gpt2.py`](../tests/test_pathways_gpt2.py) or established in the literature.
@@ -26,12 +34,24 @@ Start with these: when the verdict comes back you know what it should have said.
 
 ## Running one
 
-A pathway always runs as part of a research job. You ask the question and name the pathway, and:
+A pathway always runs as part of a research job. You ask the question and either name the pathway or
+let Scout choose one:
 
-1. **Scout** researches the question and chooses the pathway's inputs: prompts, answer tokens,
-   contrasts. The worker checks them (aligned lists, every answer a single token for the model) and
-   sends Scout any problems to fix, up to twice.
-2. **You approve** the plan and the inputs at the gate, before anything runs on a model.
+- `--pathway <name>`: that pathway runs, and Scout only chooses its inputs. Use this when you know
+  which one you want, and always for evaluation, where the pathway has to be fixed by the task.
+- `--pathway auto` (the default): Scout reads the list of pathways and picks the one that answers the
+  question, with a one-sentence reason, or picks none if nothing fits and plans the experiments
+  itself.
+- `--pathway none`: no pathway; Scout plans freely.
+
+Then:
+
+1. **Scout** plans the job and chooses the pathway's inputs: prompts, answer tokens, contrasts. The
+   worker checks them (aligned lists, every answer a single token for the model) and sends Scout any
+   problems to fix, up to twice. Scout plans from the question and what it knows; add `--search` to
+   let it search arXiv and the web as well. Without search it cites no papers as sources.
+2. **You approve** the plan, the pathway Scout chose (and why), and its inputs at the gate, before
+   anything runs on a model.
 3. **Lens** runs the pathway first, on exactly those inputs, then any extra experiments in the
    plan.
 4. **Quill** critiques the result, with the pathway's verdict as the primary evidence.
@@ -46,8 +66,8 @@ The inputs each pathway takes are listed in [`seesaw/pathways/catalog.py`](../se
 
 ### Reproducing a result
 
-Scout uses an LLM and searches the web, so asking the same question twice gives different inputs, and
-there's no seed that fixes that. The pathways themselves are deterministic (their random baselines are
+Scout uses an LLM (and, with `--search`, the web), so asking the same question twice can give a
+different pathway or different inputs, and there's no seed that fixes that. A rerun keeps both. The pathways themselves are deterministic (their random baselines are
 seeded): the same pathway version on the same model and inputs gives the same verdict.
 
 So a result is reproduced by **rerunning** its job: a new job starts at Lens with the same plan and
@@ -95,19 +115,23 @@ distribution used as ablation means).
 - How does GPT-2 choose "are" rather than "is" after a plural subject?
 - How does GPT-2 close a bracket with the right type, `)` or `]`?
 
-## Audit a reliance
+## Find and steer a concept
 
-**Pathway:** `attribute_audit`. It tests whether the model's output depends on an attribute, finds the
-attribute's direction, and checks whether removing that direction removes the behaviour without
-damaging the model.
+**Pathway:** `concept_direction`. It tests whether the output depends on a concept, finds the
+concept's direction on half the prompt pairs, and on the other half checks whether removing it
+removes the behaviour and adding it steers the behaviour, both against random directions and with a
+loss check. Last, it folds the removal into the weights and checks the result matches, so the edit
+can ship as a checkpoint. `attribute_audit` runs the same pathway; version 1 of it fitted and tested
+the direction on the same pairs, which let it pass by construction.
 
-**Inputs:** `prompts`, `counterfactual_prompts` (the same prompt with the attribute swapped),
-`positive_tokens`, `negative_tokens`. Optionally `control_prompts` (attribute-free prompts showing the
-baseline) and `control_texts` (ordinary text for checking the edit is harmless).
+**Inputs:** `prompts`, `counterfactual_prompts` (the same prompt with the concept swapped),
+`positive_tokens`, `negative_tokens`, at least 6 pairs. Optionally `control_prompts` (concept-free
+prompts showing the baseline) and `control_texts` (ordinary text for checking the edit is harmless).
 
 - ★ Does GPT-2 use the gender a job title implies to choose "she" or "he"? Does removing that
   direction remove the bias? *(e.g. "The nurse said that" vs "The engineer said that", `" she"` vs
-  `" he"`. Expected: bias found and removed.)*
+  `" he"`. Expected: `partly_uses_direction`. On held-out pairs, removal closes about a fifth of the
+  gap, well beyond random directions, and steering moves it all the way.)*
 - ★ Control: does GPT-2 use an irrelevant attribute, like the food someone ate ("The man who ate the
   apple said that" vs "... the pizza said that"), to choose the pronoun? *(expected: not flagged. Run this next to the one above: an audit that flags everything
   is worthless.)*
@@ -116,11 +140,80 @@ baseline) and `control_texts` (ordinary text for checking the edit is harmless).
 - Does GPT-2 change a review's sentiment when only the reviewer's name changes?
 - Does GPT-2 take "not" into account when it chooses a sentiment word, or ignore the negation?
 
+## Build a detector
+
+**Pathway:** `probe_monitor`. It trains a probe at every layer on your texts, picks the layer on
+those alone, then tests it on held-out texts against shuffled labels, a probe on the embeddings
+alone, and a bag-of-words classifier with no model. The question is the deployment one: is a probe
+on the activations worth it over the cheapest classifier?
+
+**Inputs:** `prompts` and `contrast_prompts` (training texts with and without the property),
+`test_prompts` and `test_contrast_prompts` (held-out texts, ideally from another source or topic).
+
+- ★ Can a GPT-2 probe trained on movie reviews detect the sentiment of product reviews? *(expected:
+  `lexical_only`. It transfers, but the sentiment words alone do as well.)*
+- Can a probe tell a question the model will answer wrongly from one it will answer correctly?
+- Can a probe flag prompts that try to override earlier instructions?
+
+## Audit a spurious dependence
+
+**Pathway:** `spurious_audit`. For a task whose answer shouldn't depend on an attribute, it measures
+how much swapping the attribute moves the answer, then erases the attribute with LEACE (fitted on
+half the pairs, applied at every layer on the other half) and checks that the dependence goes and
+the task stays, against random erasers.
+
+**Inputs:** `prompts`, `counterfactual_prompts` (only the attribute swapped), `positive_tokens`,
+`negative_tokens` (the task's right and wrong answers), at least 6 pairs. Optionally `control_texts`.
+
+- ★ Does GPT-2's sentiment judgement depend on the reviewer's name? *(expected: `no_reliance`.)*
+- ★ Does a gendered name pull GPT-2 off an occupation the context states ("My friend Mary has
+  always worked as a pilot. Everyone knows that Mary is a", `" pilot"` vs `" secretary"`)?
+  *(expected: reliance found, and erasure removes it far beyond random erasers.)*
+
+## Locate a fact
+
+**Pathway:** `factual_recall`. Causal tracing (Meng et al. 2022): it noises the subject's
+embeddings, then restores the residual stream, MLP outputs or attention outputs at each layer and
+position, and reports where the answer's probability comes back.
+
+**Inputs:** `prompts`, `subjects` (the subject as written in each prompt), `positive_tokens`.
+
+- ★ Where does GPT-2 recall that the Eiffel Tower is in Paris? *(expected: the residual stream
+  carries the fact at the subject's last token early and at the final token late. On GPT-2 small
+  the MLP effect at the subject is weak outside layers 0 and 1, so the verdict is `late_site`, not the
+  ROME pattern Meng et al. found in GPT-2 XL.)*
+
+## Edit a fact
+
+**Pathway:** `editing_comparison`. It traces each fact, then makes a ROME edit at every layer and
+scores each on efficacy, paraphrase and specificity, to test whether the traced layer is the best
+one to edit (Hase et al. 2023 found it usually isn't).
+
+**Inputs:** `prompts`, `subjects`, `positive_tokens`, `target_tokens` (the new answers),
+`paraphrase_prompts`, `neighborhood_prompts` and `neighborhood_tokens` (a different subject with the
+same relation, and its answer).
+
+- ★ Can GPT-2 be taught that Michael Jordan played soccer, and where is the best layer to do it?
+  *(expected: edits work mid-model and can't work at the last layer.)*
+
+## Diff two models
+
+**Pathway:** `model_diffing`. It compares the job's model with `other_model` on your prompts: the KL
+divergence per prompt, what each predicts where they differ most, the tokens the change made more
+likely, and (same architecture only) how much of the difference each component's weights account
+for, by swapping them in one at a time.
+
+**Inputs:** `prompts`, and `other_model` (a single TransformerLens model name, not a list).
+
+- ★ Planted: a copy of GPT-2 with noise added to block 5's MLP. *(expected: `localized` at block 5.)*
+- What did instruction tuning change in a Pythia checkpoint, and is it in a few blocks or everywhere?
+
 ## Explain an output
 
 **Pathway:** `feature_explain`. It finds the sparse autoencoder (SAE) features that drive the answer
-and describes what each one responds to. It only runs on `gpt2`, because it uses a GPT-2 small SAE
-(`gpt2-small-res-jb`, layer 8 residual stream).
+and describes what each one responds to. It sweeps GPT-2 small SAEs (`gpt2-small-res-jb`, residual
+stream at layers 4, 6, 8 and 10) and explains the layer where switching features off accounts for
+the most, so it only runs on `gpt2`.
 
 **Inputs:** `prompts`, `positive_tokens`, `negative_tokens`.
 
@@ -140,4 +233,4 @@ fixed verdict.
 | Debug a failure | Why does GPT-2 get IOI wrong when the two names are the same gender and length? | Run correct and failing prompts through the same circuit and compare |
 | Replicate a claim | Does the IOI circuit from Wang et al. (2022) show up in Pythia-160m? | `circuit_discovery` with inputs taken from the paper, checked against its heads |
 | Trace a multi-hop fact | How does the model get from "Dallas" to "Austin"? (Ameisen et al. 2025 found a route through "Texas" in Gemma-2-2B) | Attribution graphs, which Lens's `circuit_tracing` tool reads from Neuronpedia but no pathway uses yet |
-| Steer or edit | Can I remove the gender direction without hurting GPT-2 on ordinary text? | The ablation step inside `attribute_audit`, exposed on its own |
+| Attribute to the context | Which retrieved passage made the model give this answer? | Input and context attribution (gradient × input, ablating one passage at a time) |

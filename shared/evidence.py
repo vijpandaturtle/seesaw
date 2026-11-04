@@ -146,8 +146,43 @@ TRUST: dict[Backend, dict[str, Trust]] = {
 }
 
 
+# Pathway steps that aren't Lens tools: their kind, and what they need.
+PATHWAY_STEPS: dict[str, tuple[Kind, Trust]] = {
+    "bake_check": ("causal", Trust(caveat=(
+        "Checks the edit folded into the weights matches the hook version; it doesn't test the "
+        "direction itself."))),
+    "probe_transfer": ("descriptive", Trust(controls=(
+        Control("shuffled_accuracy", "shuffled labels"),
+        Control("embedding_accuracy", "a probe on the embeddings alone"),
+        Control("text_baseline_accuracy", "a bag-of-words classifier with no model"),
+    ), caveat="The held-out texts test transfer only as far as they differ from the training texts.")),
+    "leace_erasure": ("causal", Trust(controls=(
+        Control("random_fraction_removed", "random erasers of the same rank"),
+        Control("control_loss_after", "language-modelling loss with the erasers applied"),
+    ), caveat="LEACE removes what a linear readout could see; a nonlinear one might still see it.")),
+    "causal_tracing": ("causal", Trust(caveat=(
+        "Noised embeddings are unnatural input: recovery shows where clean information helps, "
+        "not the whole mechanism."))),
+    "rome_edits": ("causal", Trust(caveat=(
+        "The key covariance comes from a short built-in corpus, so specificity is rougher than "
+        "published ROME numbers."))),
+    "model_diff": ("causal", Trust(caveat=(
+        "Covers only these prompts: a change that shows up on other inputs won't appear here."))),
+    "mlp_patching": ("causal", Trust(caveat=_PATCHING)),
+}
+
+
+def _lookup(tool: str, backend: Backend | None) -> tuple[Kind, Trust]:
+    """The kind and trust entry for a Lens tool or pathway step (`name@layer` reads as `name`)."""
+    tool = tool.split("@", 1)[0]
+    entry = catalog(backend).get(tool)
+    if entry is not None:
+        return entry.kind, TRUST[backend or active_backend()].get(tool, Trust())
+    return PATHWAY_STEPS.get(tool, ("descriptive", Trust()))
+
+
 def trust(tool: str, backend: Backend | None = None) -> Trust:
-    return TRUST[backend or active_backend()].get(tool, Trust())
+    return _lookup(tool, backend)[1]
 
 
 def refusal(tool: str, n_prompts: int, backend: Backend | None = None) -> str | None:
@@ -164,7 +199,8 @@ def assess(tool: str, data: dict, n_prompts: int | None = None,
     """The plain-language assessment of one successful result.
 
     Args:
-        tool: Catalog name of the tool that produced `data`.
+        tool: Catalog name of the tool that produced `data`, or a pathway step
+            name from PATHWAY_STEPS.
         data: The result's data, where controls store their numbers.
         n_prompts: How many prompts it ran on; None skips the thin-data check.
         backend: Defaults to the active one.
@@ -173,10 +209,8 @@ def assess(tool: str, data: dict, n_prompts: int | None = None,
         {strength, kind, shows, does_not_show, controls, complete, caveats, label}.
         `complete` is False when a required control didn't run.
     """
-    entry = catalog(backend).get(tool)
-    kind: Kind = entry.kind if entry else "descriptive"
+    kind, spec = _lookup(tool, backend)
     strength = STRENGTHS[kind]
-    spec = trust(tool, backend)
 
     controls = [
         {"name": c.key, "what": c.what, "required": c.required,

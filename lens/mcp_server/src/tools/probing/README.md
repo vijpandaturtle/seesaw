@@ -4,7 +4,8 @@ Reading whether a specific concept or property is linearly (or non-linearly) dec
 
 ## Built in `seesaw.interp.probing`
 The computation lives in the library; the Lens wrapper is in `lens/mcp_server/src/tools/` and the tool is in `shared/lens_tools.py`.
-- `linear_probe` — per-layer cross-validated logistic probe, plus the difference-of-means (CAA-style) direction at the best layer
+- `linear_probe` — per-layer cross-validated logistic probe with a shuffled-label control, plus the difference-of-means (CAA-style) direction at the best layer
+- `transfer` — choose a probe's layer on training texts, score it on held-out ones against shuffled labels, an embeddings-only probe and a bag-of-words classifier (library and pathways only)
 
 ## Not yet implemented
 - **truthfulness_probing** — Probing classifiers specifically targeting truthful vs. untruthful internal states.

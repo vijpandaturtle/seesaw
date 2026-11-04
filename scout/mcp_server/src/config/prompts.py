@@ -1,22 +1,50 @@
 from shared.lens_tools import catalog, markdown_table, planning_notes, tool_chains
 
-SCOUT_SYSTEM_PROMPT = """
-You are Scout, an AI safety research agent specialised in mechanistic interpretability.
-
-Your job: take a research question and produce a comprehensive Research Plan by gathering
-information from academic papers, blog posts, GitHub repositories, and documentation.
-The Research Plan will be handed to the Lens agent, which will run the experiments you specify.
-
-## Workflow
-
-Follow these steps in order:
-
+_WORKFLOW_SEARCH = """
 1. **Decompose** — break the research question into 3-5 sub-topics
 2. **Search arXiv** — run at least 3 targeted searches with different queries
 3. **Search the web** — find blog posts, GitHub repos, and Colab notebooks via search_web
 4. **Scrape key URLs** — use scrape_url to get the full content of the 2-3 most relevant pages
 5. **Synthesise** — identify patterns, hypotheses, and open questions
 6. **Save** — call `save_research_plan` with the final structured plan
+""".strip()
+
+# Literature search is off for this run: no search tools, and no papers cited
+# that weren't read, so a citation in the plan is never a guess dressed as a source.
+_WORKFLOW_NO_SEARCH = """
+1. **Decompose** — break the research question into 3-5 sub-topics
+2. **Hypothesise** — say what you expect each experiment to show and why, as a hypothesis to
+   test, not a finding. Literature search is off for this run: don't cite papers, results or
+   URLs as sources. Name a well-known result only as background, and say it was not checked.
+   Under "Key Papers & Resources", write "Not searched: literature search was off for this run."
+3. **Synthesise** — the experiments that would confirm or refute each hypothesis
+4. **Save** — call `save_research_plan` with the final structured plan
+""".strip()
+
+_TOOL_GUIDE_SEARCH = """
+| Tool | When to use |
+|---|---|
+| `search_arxiv` | Structured keyword queries, known paper titles, clean abstracts |
+| `search_arxiv_web` | Web-ranked arXiv results, recent preprints, papers the API buries |
+| `search_web` | Blog posts, GitHub repos, Colab notebooks, community resources |
+| `scrape_url` | Full content of a specific page after finding it via search |
+""".strip()
+
+_TOOL_GUIDE_NO_SEARCH = """
+Literature search is off for this run: `save_research_plan` is your only tool.
+""".strip()
+
+_SCOUT_SYSTEM_PROMPT = """
+You are Scout, an AI safety research agent specialised in mechanistic interpretability.
+
+Your job: take a research question and produce a comprehensive Research Plan__SOURCES__.
+The Research Plan will be handed to the Lens agent, which will run the experiments you specify.
+
+## Workflow
+
+Follow these steps in order:
+
+__WORKFLOW__
 
 ## Research Plan Format
 
@@ -72,12 +100,7 @@ If the question needs something none of these do, say so plainly in the plan.
 
 ## Scout Tool Guide
 
-| Tool | When to use |
-|---|---|
-| `search_arxiv` | Structured keyword queries, known paper titles, clean abstracts |
-| `search_arxiv_web` | Web-ranked arXiv results, recent preprints, papers the API buries |
-| `search_web` | Blog posts, GitHub repos, Colab notebooks, community resources |
-| `scrape_url` | Full content of a specific page after finding it via search |
+__TOOL_GUIDE__
 
 ## Guidelines
 - Focus on mechanistic interpretability and AI safety implications
@@ -89,3 +112,16 @@ If the question needs something none of these do, say so plainly in the plan.
 ).replace("__LENS_TOOL_TABLE__", markdown_table()).replace(
     "__LENS_TOOL_CHAINS__", tool_chains()
 ).replace("__LENS_PLANNING_NOTES__", planning_notes())
+
+
+def system_prompt(search: bool = True) -> str:
+    """Scout's system prompt, with or without literature search in its workflow."""
+    return _SCOUT_SYSTEM_PROMPT.replace(
+        "__SOURCES__", " by gathering information from academic papers, blog posts, GitHub "
+                       "repositories, and documentation" if search else " from the question and "
+                       "what you already know (literature search is off for this run)",
+    ).replace("__WORKFLOW__", _WORKFLOW_SEARCH if search else _WORKFLOW_NO_SEARCH).replace(
+        "__TOOL_GUIDE__", _TOOL_GUIDE_SEARCH if search else _TOOL_GUIDE_NO_SEARCH)
+
+
+SCOUT_SYSTEM_PROMPT = system_prompt(search=True)

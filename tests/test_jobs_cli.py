@@ -70,6 +70,15 @@ def test_submit_can_name_a_pathway(jobs, launched, monkeypatch, capsys):
     assert "unknown pathway 'nope'" in capsys.readouterr().err
 
 
+def test_submit_lets_scout_choose_unless_told_otherwise(jobs, launched, monkeypatch):
+    for extra, params in [((), {"pathway": "auto"}),
+                          (("--pathway", "none"), {}),
+                          (("--pathway", "none", "--search"), {"search": True}),
+                          (("--search",), {"pathway": "auto", "search": True})]:
+        assert seesaw(monkeypatch, "jobs", "submit", "q", *extra, "--runner", "queue") == 0
+        assert jobs.list_jobs()[0].params_dict == params, extra
+
+
 def test_rerun_queues_the_approved_inputs_at_lens(jobs, launched, monkeypatch, capsys, tmp_path):
     import json
 

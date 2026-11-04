@@ -18,6 +18,7 @@ change the output?); otherwise it's the mean logit diff on `prompts`.
 Answers: "Does the model need this direction for the behaviour?"
 """
 
+import contextlib
 from pathlib import Path
 
 import matplotlib
@@ -39,7 +40,10 @@ def _hooks(model, unit: torch.Tensor | None):
     def project_out(value, hook):
         return value - (value @ unit).unsqueeze(-1) * unit
 
-    names = [f"blocks.{l}.hook_resid_pre" for l in range(model.cfg.n_layers)]
+    # resid_mid too: attention writes into the stream before the MLP reads it,
+    # so projecting only between blocks would let each MLP see the direction.
+    mids = [] if model.cfg.attn_only else ["hook_resid_mid"]
+    names = [f"blocks.{l}.{site}" for l in range(model.cfg.n_layers) for site in ["hook_resid_pre", *mids]]
     names.append(f"blocks.{model.cfg.n_layers - 1}.hook_resid_post")
     return [(n, project_out) for n in names]
 
@@ -141,3 +145,31 @@ def compute(
             "measured":               "gap vs counterfactuals" if cf_tokens is not None else "logit diff",
         },
     )
+
+
+@contextlib.contextmanager
+def orthogonalized(model: HookedTransformer, direction: list[float]):
+    """Bake the ablation into the weights: no matrix that writes to the residual stream can write `direction`.
+
+    The weight form of the hook above (Arditi et al. 2024): the embeddings and
+    every attention and MLP output matrix (and bias) have their component
+    along the direction projected out. The residual stream is the sum of what
+    they write, so it never contains the direction, which is what the hooks
+    enforce at every layer. The difference is that this version ships as a
+    checkpoint. The weights are restored on exit.
+    """
+    unit = torch.tensor(direction, device=model.cfg.device, dtype=model.cfg.dtype)
+    unit = unit / unit.norm()
+    params = [model.W_E, model.W_pos]
+    for block in model.blocks:
+        params += [block.attn.W_O, block.attn.b_O]
+        if not model.cfg.attn_only:
+            params += [block.mlp.W_out, block.mlp.b_out]
+    originals = [p.data.clone() for p in params]
+    for p in params:
+        p.data -= (p.data @ unit).unsqueeze(-1) * unit
+    try:
+        yield model
+    finally:
+        for p, o in zip(params, originals):
+            p.data.copy_(o)

@@ -363,25 +363,31 @@ def create(question: str, model: str = "gpt2", auto_approve: bool = False,
         auto_approve: Run all three stages without stopping at the
             human gates between them.
         params: {"pathway": name} to make one of seesaw.pathways part of the
-            job. Scout chooses its inputs.
+            job (Scout chooses its inputs), or {"pathway": "auto"} to have
+            Scout choose the pathway too, or none. {"search": True} gives
+            Scout its literature search tools; it plans without them otherwise.
 
     Returns:
         The created Job.
 
     Raises:
-        ValueError: params other than a pathway, or an unknown pathway.
+        ValueError: params other than a pathway and search, or an unknown pathway.
     """
     if params:
         from seesaw.pathways import catalog
 
-        if set(params) != {"pathway"}:
-            raise ValueError("a research job's params name only a pathway: "
-                             "{\"pathway\": name}; Scout chooses its inputs")
-        if params["pathway"] not in catalog.names():
-            raise ValueError(f"unknown pathway {params['pathway']!r}; "
-                             f"expected one of {catalog.names()}")
-        if params["pathway"] == "feature_explain" and model not in catalog.SAE_MODELS:
+        if not set(params) <= {"pathway", "search"}:
+            raise ValueError("a research job's params are only {\"pathway\": name or \"auto\", "
+                             "\"search\": bool}; Scout chooses the pathway's inputs")
+        name = params.get("pathway")
+        if name is not None and name != catalog.AUTO and name not in catalog.names():
+            raise ValueError(f"unknown pathway {name!r}; expected one of "
+                             f"{[catalog.AUTO, *catalog.names()]}")
+        if name == "feature_explain" and model not in catalog.SAE_MODELS:
             raise ValueError(f"feature_explain only runs on gpt2, not {model!r}")
+        if "search" in params and not isinstance(params["search"], bool):
+            raise ValueError("search must be true or false")
+        params = {k: v for k, v in params.items() if v is not None}
 
     return _insert(question, model, STAGES[0], auto_approve, params)
 

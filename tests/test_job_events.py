@@ -267,7 +267,7 @@ def test_scouts_failed_input_checks_are_recorded(jobs, events, monkeypatch):
             return iter(())
 
     monkeypatch.setattr(catalog, "_tokenizer", lambda model: FakeTokenizer())
-    monkeypatch.setattr(scout_client, "build_agent", lambda output_dir: FakeAgent(output_dir))
+    monkeypatch.setattr(scout_client, "build_agent", lambda output_dir, search=True: FakeAgent(output_dir))
     job = jobs.create("IOI", params={"pathway": "circuit_discovery"})
     assert worker.run_job(job.id) == 0
 

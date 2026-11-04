@@ -89,8 +89,9 @@ def scout(jobs, monkeypatch):
     made = []
 
     def install(*plans):
-        def build_agent(output_dir):
+        def build_agent(output_dir, search=True):
             made.append(FakeAgent(output_dir, plans))
+            made[-1].search = search
             return made[-1]
         monkeypatch.setattr(scout_client, "build_agent", build_agent)
         return made
@@ -148,14 +149,18 @@ def run_stage(jobs, job_id):
 
 
 # ── store ────────────────────────────────────────────────────────────────────
-def test_a_research_job_may_name_a_pathway_and_nothing_else(jobs):
+def test_a_research_job_may_name_a_pathway_ask_for_one_or_turn_on_search(jobs):
     job = jobs.create("IOI", params={"pathway": "circuit_discovery"})
     assert (job.kind, job.stage, job.params_dict) == ("research", "scout",
                                                       {"pathway": "circuit_discovery"})
     with pytest.raises(ValueError, match="unknown pathway"):
         jobs.create("IOI", params={"pathway": "nope"})
-    with pytest.raises(ValueError, match="name only a pathway"):
+    with pytest.raises(ValueError, match="params are only"):
         jobs.create("IOI", params={"pathway": "circuit_discovery", **IOI})
+    assert jobs.create("IOI", params={"pathway": "auto", "search": True}).params_dict == {
+        "pathway": "auto", "search": True}
+    with pytest.raises(ValueError, match="search must be"):
+        jobs.create("IOI", params={"search": "yes"})
     with pytest.raises(ValueError, match="only runs on gpt2"):
         jobs.create("IOI", model="pythia-70m", params={"pathway": "feature_explain"})
 
@@ -261,7 +266,7 @@ def test_lens_runs_the_pathway_first_on_the_approved_inputs(jobs, scout, pathway
     bundle = json.loads(open(after.bundle_path).read())
     first, extra = bundle["results"]
     assert (first["role"], first["name"], first["tool"]) == (
-        "pathway", "pathway:circuit_discovery", "circuit_discovery@v1")
+        "pathway", "pathway:circuit_discovery", f"circuit_discovery@v{catalog.version('circuit_discovery')}")
     assert first["data"]["verdict"] == "circuit_found"
     assert first["tool_kwargs"] == IOI
     assert (extra["role"], extra["name"]) == ("extra", "logit_lens_ioi")
@@ -420,3 +425,80 @@ def test_a_rerun_reads_the_plan_again_when_the_source_bundle_is_gone(jobs, scout
     assert lens["replays"][-1] is None
     note = next(e for e in events.list_events(again.id) if e["kind"] == "note")
     assert note["status"] == "error" and "reads the plan again" in note["summary"]
+
+
+
+# ── Scout chooses the pathway ────────────────────────────────────────────────
+def choice(name, params=None, why="it asks which heads carry IOI"):
+    """A Scout plan under "auto": a pathway (or null) with a reason and inputs."""
+    block = {"pathway": name, "why": why, **({"params": params} if params is not None else {})}
+    return plan(params=None) + "\n```json\n" + json.dumps(block) + "\n```\n"
+
+
+def test_under_auto_scout_picks_the_pathway_and_its_inputs(jobs, scout):
+    agents = scout(choice("circuit_discovery", IOI))
+    job = jobs.create("What heads mediate IOI?", params={"pathway": "auto"})
+
+    code, after = run_stage(jobs, job.id)
+    assert code == 0 and (after.stage, after.status) == ("lens", jobs.AWAITING)
+    assert "## Choose a pathway (or none)" in agents[0].messages[0]
+    assert "attribute_audit" not in agents[0].messages[0]          # the old name isn't offered
+    assert after.params_dict == {"pathway": "circuit_discovery", "pathway_params": IOI,
+                                 "pathway_request": "auto", "pathway_why": "it asks which heads carry IOI"}
+
+
+def test_under_auto_scout_may_choose_no_pathway(jobs, scout, lens):
+    scout(choice(None, why="it's about training data, which no pathway looks at"))
+    job = jobs.create("Which training documents taught GPT-2 IOI?", params={"pathway": "auto"})
+
+    code, after = run_stage(jobs, job.id)
+    assert code == 0
+    assert after.params_dict == {"pathway_request": "auto",
+                                 "pathway_why": "it's about training data, which no pathway looks at"}
+    # Lens gets the plan without the choice block, and no pathway runs.
+    jobs.approve(job.id)
+    code, after = run_stage(jobs, job.id)
+    assert code == 0
+    assert '"pathway": null' not in lens["plans"][0] and "## Experiments" in lens["plans"][0]
+
+
+def test_an_unusable_choice_is_sent_back_for_revision(jobs, scout):
+    agents = scout(choice("nope", IOI), choice("circuit_discovery", IOI, why=""),
+                   choice("circuit_discovery", IOI))
+    job = jobs.create("IOI", params={"pathway": "auto"})
+
+    code, after = run_stage(jobs, job.id)
+    assert code == 0
+    assert "unknown pathway 'nope'" in agents[0].messages[1]
+    assert 'needs a "why"' in agents[0].messages[2]
+    assert after.params_dict["pathway"] == "circuit_discovery"
+
+
+def test_a_retried_auto_scout_chooses_again(jobs, scout):
+    scout(choice("circuit_discovery", IOI))
+    job = jobs.create("IOI", params={"pathway": "auto"})
+    run_stage(jobs, job.id)
+
+    from orchestrator.src import worker
+
+    agents = scout(choice(None, why="on reflection, nothing fits"))
+    worker.run_scout_stage(jobs.get(job.id))                       # what a retried stage runs
+    after = jobs.get(job.id)
+    assert "## Choose a pathway" in agents[-1].messages[0]         # asked to choose, not bound
+    assert after.params_dict == {"pathway_request": "auto", "pathway_why": "on reflection, nothing fits"}
+
+
+def test_search_is_off_unless_the_job_asks_for_it(jobs, scout):
+    agents = scout(plan(params=None))
+    run_stage(jobs, jobs.create("IOI").id)
+    scout(plan(params=None))                                # same list: agents[1] is the next job's
+    run_stage(jobs, jobs.create("IOI", params={"search": True}).id)
+    assert agents[0].search is False and agents[1].search is True
+
+
+def test_the_choice_brief_lists_each_pathway_with_its_inputs():
+    brief = catalog.choice_brief("gpt2")
+    for name in ("circuit_discovery", "concept_direction", "model_diffing", "feature_explain"):
+        assert f"`{name}`" in brief
+    assert "`other_model` (one string)" in brief
+    assert "`feature_explain`" not in catalog.choice_brief("pythia-70m")   # its SAE is gpt2's

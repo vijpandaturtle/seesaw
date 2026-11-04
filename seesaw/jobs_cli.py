@@ -1,6 +1,6 @@
 """`seesaw jobs …` — submit and drive jobs in the shared job store from a terminal.
 
-    seesaw jobs submit "<question>" [--pathway P] [--model M] [--auto-approve] [--follow]
+    seesaw jobs submit "<question>" [--pathway P|auto|none] [--search] [--model M] [--auto-approve] [--follow]
     seesaw jobs rerun <id> [--model M] [--auto-approve] [--follow]
     seesaw jobs list [--limit N] [--json]
     seesaw jobs show <id> [--json]
@@ -15,8 +15,10 @@ nothing, these go through the same job store the dashboard reads: a job
 submitted here shows up there, and one queued there can be approved here.
 
 `--pathway` makes one of seesaw.pathways part of the job; Scout chooses its
-inputs. `rerun` runs that pathway again on the same approved inputs, from
-Lens, optionally on another model: the reproducible part of a job.
+inputs. It defaults to `auto`, where Scout chooses the pathway too (or none);
+`--pathway none` skips pathways. `--search` lets Scout search the literature
+while planning. `rerun` runs that pathway again on the same approved inputs,
+from Lens, optionally on another model: the reproducible part of a job.
 
 Who executes a stage is the runner, chosen like the dashboard chooses it:
 
@@ -123,9 +125,15 @@ def _describe(job) -> str:
         f"updated  {_age(job.updated_at)} ago",
     ]
     params = job.params_dict
+    chose = params.get("pathway_request") == "auto"
     if params.get("pathway"):
         lines.append(f"pathway  {params['pathway']}"
+                     + ("  (chosen by Scout)" if chose else "")
                      + (f"  (rerun of {params['rerun_of']})" if params.get("rerun_of") else ""))
+    elif chose and "pathway_why" in params:
+        lines.append("pathway  none (Scout chose not to run one)")
+    if params.get("pathway_why"):
+        lines.append(f"why      {params['pathway_why']}")
     for label, path in (("plan", job.plan_path), ("bundle", job.bundle_path), ("report", job.report_path)):
         if path:
             lines.append(f"{label:8s} {path}")
@@ -235,7 +243,7 @@ def _approve(job_id: str, runner: str) -> bool:
 def cmd_submit(args) -> int:
     try:
         job = _jobs().create(args.question, model=args.model, auto_approve=args.auto_approve,
-                             params={"pathway": args.pathway} if args.pathway else None)
+                             params=_submit_params(args))
     except ValueError as exc:
         print(exc, file=sys.stderr)
         return 1
@@ -244,6 +252,16 @@ def cmd_submit(args) -> int:
     if used == "queue":
         print("nothing will run it until a poller claims it: python -m orchestrator.src.worker --poll")
     return follow(job.id, args.runner) if args.follow else 0
+
+
+def _submit_params(args) -> dict | None:
+    """--pathway (a name, auto, or none) and --search, as a job's params."""
+    params = {}
+    if args.pathway and args.pathway != "none":
+        params["pathway"] = args.pathway
+    if args.search:
+        params["search"] = True
+    return params or None
 
 
 def cmd_rerun(args) -> int:
@@ -342,8 +360,13 @@ def add_parser(sub) -> None:
 
     p = js.add_parser("submit", help="create a job and start its first stage")
     p.add_argument("question")
-    p.add_argument("--pathway", help="run this seesaw pathway as part of the job; Scout chooses its "
-                                     "inputs (circuit_discovery, attribute_audit, feature_explain)")
+    p.add_argument("--pathway", default="auto",
+                   help="auto (default): Scout chooses a pathway, or none, and its inputs; a name "
+                        "(circuit_discovery, concept_direction, probe_monitor, spurious_audit, "
+                        "factual_recall, editing_comparison, model_diffing, feature_explain): run "
+                        "that one, Scout chooses its inputs; none: no pathway, Scout plans freely")
+    p.add_argument("--search", action="store_true",
+                   help="let Scout search arXiv and the web while planning (off by default)")
     p.add_argument("--model", default="gpt2", help="model Lens should target (default: gpt2)")
     p.add_argument("--auto-approve", action="store_true", help="run all stages without approval gates")
     runner_arg(p)
