@@ -63,7 +63,7 @@ image = (
           "SEESAW_MODAL_APP": APP_NAME, "SEESAW_HF_SECRET": HF_SECRET})
     # The tools and their helpers, without the agent/LLM layer. Lens's tools
     # are thin wrappers over seesaw.interp, so the library has to ship too.
-    .add_local_python_source("lens", "seesaw")
+    .add_local_python_source("lens", "seesaw", "shared")
 )
 
 volume = modal.Volume.from_name("seesaw-hf-cache", create_if_missing=True)
