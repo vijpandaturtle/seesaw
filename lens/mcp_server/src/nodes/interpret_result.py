@@ -1,16 +1,8 @@
 import json
 
-from shared.lens_tools import catalog
+from shared.evidence import as_text, assess, how_to_report
 
 from ..utils import make_llm
-
-_KIND_NOTE = {
-    "descriptive": "This tool is descriptive: it shows association, not that anything is necessary. "
-                   "Do not make causal claims from it.",
-    "estimate":    "This tool is a gradient-based estimate: its numbers rank candidates but are not "
-                   "measured effects. Say which candidates deserve a causal test; do not call them causal.",
-    "causal":      "This tool is a causal intervention: its numbers are measured effects of changing the model.",
-}
 
 
 def data_preview(data: dict, limit: int = 2_000) -> str:
@@ -34,16 +26,19 @@ def interpret_result(state: dict) -> dict:
 
     llm          = make_llm()
     preview      = data_preview(result["data"])
-    kind         = catalog().get(result["tool"])
-    kind_note    = _KIND_NOTE[kind.kind] if kind else ""
+    evidence     = result.get("evidence") or assess(result["tool"], result["data"], len(result["prompts"]))
     response     = llm.invoke(
         f"You are an AI safety researcher specialised in mechanistic interpretability.\n"
         f"Interpret this experiment result in 2-3 paragraphs:\n"
         f"1. What do the results reveal about the model's internal mechanisms?\n"
         f"2. What is the most important finding?\n"
         f"3. How does this connect to the research question: \"{state['research_question']}\"\n\n"
+        f"Open with one sentence, in plain words a non-expert can follow, saying how strong this "
+        f"evidence is and why. If a required control is missing, say the result is incomplete, name "
+        f"what's missing, and don't draw the conclusion it would have supported. Respect the caveats.\n\n"
         f"Experiment: {result['name']} | Tool: {result['tool']}\n"
-        f"{kind_note}\n"
+        f"{how_to_report(result['tool'])}\n"
+        f"{as_text(evidence)}\n"
         f"Data: {preview}"
     )
     result["summary"] = response.content

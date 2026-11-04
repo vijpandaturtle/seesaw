@@ -77,6 +77,7 @@ def compute(
     n_folds: int = 5,
     weight_decay: float = 1e-2,
     seed: int = 0,
+    n_shuffles: int = 5,
 ) -> InterpResult:
     """Fit a probe separating prompts_a from prompts_b at every layer.
 
@@ -88,10 +89,12 @@ def compute(
         n_folds: Cross-validation folds (capped at the smaller set's size).
         weight_decay: L2 penalty; small datasets in high dimensions overfit without it.
         seed: Seed for the fold split.
+        n_shuffles: Times to refit every layer's probe on shuffled labels, the
+            control. 0 skips it (shuffled_accuracy is then None).
 
     Returns:
-        InterpResult with per-layer accuracy, the best layer, and the
-        difference-of-means direction there.
+        InterpResult with per-layer accuracy, the best layer, the
+        difference-of-means direction there, and the shuffled-label control.
     """
     output_dir.mkdir(parents=True, exist_ok=True)
     acts = torch.cat([_final_resids(model, prompts_a), _final_resids(model, prompts_b)], dim=1)
@@ -101,15 +104,26 @@ def compute(
     order = torch.randperm(n, generator=torch.Generator().manual_seed(seed))
     folds = [order[i::n_folds] for i in range(n_folds)]
 
-    accuracies = []
-    for layer_acts in acts:
+    def cv_accuracy(layer_acts, y) -> float:
         correct = 0
         for test_idx in folds:
             train_mask = torch.ones(n, dtype=torch.bool)
             train_mask[test_idx] = False
-            pred = _fit_predict(layer_acts[train_mask], labels[train_mask], layer_acts[test_idx], weight_decay)
-            correct += (pred.float() == labels[test_idx]).sum().item()
-        accuracies.append(correct / n)
+            pred = _fit_predict(layer_acts[train_mask], y[train_mask], layer_acts[test_idx], weight_decay)
+            correct += (pred.float() == y[test_idx]).sum().item()
+        return correct / n
+
+    accuracies = [cv_accuracy(layer_acts, labels) for layer_acts in acts]
+
+    # The control: with few prompts in many dimensions a probe can separate
+    # almost anything. Shuffled labels show what it scores on nothing. The
+    # best layer is a max over layers, so each shuffle takes its max too.
+    gen = torch.Generator().manual_seed(seed + 1)
+    shuffled = [
+        max(cv_accuracy(layer_acts, y) for layer_acts in acts)
+        for y in (labels[torch.randperm(n, generator=gen)] for _ in range(n_shuffles))
+    ]
+    shuffled_acc = sum(shuffled) / len(shuffled) if shuffled else None
 
     # Earliest layer within a hair of the best: later layers often tie, and
     # the earliest is where the concept first becomes available.
@@ -121,6 +135,8 @@ def compute(
     fig, ax = plt.subplots(figsize=(8, 4))
     ax.plot(range(len(accuracies)), accuracies, marker="o", color="#d73027")
     ax.axhline(0.5, color="grey", linestyle="--", label="chance")
+    if shuffled_acc is not None:
+        ax.axhline(shuffled_acc, color="#4575b4", linestyle=":", label="shuffled labels (best layer)")
     ax.axvline(best_layer, color="black", linewidth=0.8)
     ax.set_xlabel("Layer (resid_post)")
     ax.set_ylabel(f"{n_folds}-fold CV accuracy")
@@ -138,6 +154,7 @@ def compute(
             "accuracies":     [round(a, 4) for a in accuracies],
             "best_layer":     best_layer,
             "best_accuracy":  round(best_acc, 4),
+            "shuffled_accuracy": None if shuffled_acc is None else round(shuffled_acc, 4),
             "direction":      direction.tolist(),
             "direction_norm": round(direction.norm().item(), 4),
             "n_per_class":    [len(prompts_a), len(prompts_b)],

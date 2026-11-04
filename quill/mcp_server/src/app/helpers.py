@@ -1,3 +1,5 @@
+from shared.evidence import as_text
+
 from ..models.schemas import CritiqueReport, ExperimentBundle, ExperimentResult
 
 
@@ -14,6 +16,8 @@ def format_result_for_context(result: ExperimentResult) -> str:
         "",
         f"**Lens summary**: {result.summary or '(no summary)'}",
     ]
+    if result.evidence:
+        lines += ["", as_text(result.evidence)]
     if result.tool_kwargs:
         lines += ["", "**Ran with**:"]
         for k, v in result.tool_kwargs.items():

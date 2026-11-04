@@ -31,7 +31,7 @@ from seesaw.interp.feature_extraction import feature_attribution, neuronpedia  #
 from seesaw.interp.metrics import logit_diff, recovery  # noqa: E402
 from seesaw.interp.model_editing import directional_ablation  # noqa: E402
 from seesaw.interp.probing import linear_probe  # noqa: E402
-from seesaw.interp.steering import feature_clamping  # noqa: E402
+from seesaw.interp.steering import feature_clamping, steering_vector  # noqa: E402
 from seesaw.pathways import attribute_audit, circuit_discovery, feature_explain  # noqa: E402
 from seesaw.pathways.result import PathwayResult  # noqa: E402
 
@@ -213,6 +213,22 @@ def test_probe_fits_separable_data():
     y = (x[:, 0] > 0).float()
     pred = linear_probe._fit_predict(x, y, x, weight_decay=1e-3)
     assert (pred.float() == y).float().mean().item() >= 0.95
+
+
+def test_probe_reports_a_shuffled_label_control(model, tmp_path):
+    r = linear_probe.compute(model, PROMPTS + CORRUPTED, CORRUPTED + PROMPTS, tmp_path, n_shuffles=2)
+    assert 0.0 <= r.data["shuffled_accuracy"] <= 1.0
+    assert linear_probe.compute(model, PROMPTS, CORRUPTED, tmp_path, n_shuffles=0).data[
+        "shuffled_accuracy"] is None
+
+
+def test_steering_controls(model, tmp_path):
+    direction = torch.randn(model.cfg.d_model).tolist()
+    r = steering_vector.compute(model, PROMPTS, POS, NEG, direction, 0, tmp_path, alphas=[-1.0, 0.0, 1.0])
+    assert r.data["random_abs_slope"] >= 0 and r.data["control_loss_alpha"] == -1.0
+    # With no push at all, the loss check has nothing to change.
+    still = steering_vector.compute(model, PROMPTS, POS, NEG, direction, 0, tmp_path, alphas=[0.0, 0.0])
+    assert still.data["control_loss_after"] == pytest.approx(still.data["control_loss_before"])
 
 
 def test_directional_ablation_removes_the_component(model):

@@ -34,6 +34,9 @@ class ExperimentResult:
     # The arguments the tool actually ran with (after normalisation), so a
     # reader can tell what was measured: which answer tokens, which images.
     tool_kwargs: dict = field(default_factory=dict)
+    # shared.evidence.assess: how strong the result is and whether its
+    # controls ran. Set by run_experiment on success.
+    evidence: dict = field(default_factory=dict)
 
 
 @dataclass

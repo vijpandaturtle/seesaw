@@ -9,6 +9,10 @@ from pathlib import Path
 from typing import Callable
 
 from seesaw.interp.result import InterpResult
+from shared.evidence import assess
+
+# Steps named after something other than the tool they ran.
+_STEP_TOOLS = {"ablation_sweep": "ablation", "steering": "steering_vector"}
 
 # Called as each step's result is recorded: (pathway, step, result, seconds
 # since the previous step was recorded). The job worker listens to put
@@ -82,6 +86,12 @@ class PathwayResult:
     def plot_paths(self) -> list[Path]:
         return [p for step in self.steps.values() for p in step.plot_paths]
 
+    def step_evidence(self) -> dict[str, dict]:
+        """shared.evidence.assess for every step, keyed by step name."""
+        return {name: assess(_STEP_TOOLS.get(name, name), getattr(step, "data", None) or {},
+                             backend="seesaw")
+                for name, step in self.steps.items()}
+
     def stop(self, verdict: str, reason: str) -> "PathwayResult":
         self.verdict, self.stopped_early = verdict, reason
         self.evidence.append(f"Stopped: {reason}.")
@@ -97,7 +107,8 @@ class PathwayResult:
             for key, value in self.findings.items():
                 lines.append(f"- **{key}:** {value}")
             lines.append("")
-        lines += ["## Steps run", ""] + [f"1. `{name}`" for name in self.steps]
+        evidence = self.step_evidence()
+        lines += ["## Steps run", ""] + [f"1. `{name}` — {evidence[name]['label']}" for name in self.steps]
         if self.plot_paths:
             lines += ["", "## Plots", ""] + [f"- {p}" for p in self.plot_paths]
         return "\n".join(lines) + "\n"

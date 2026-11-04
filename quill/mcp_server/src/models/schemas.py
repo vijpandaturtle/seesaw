@@ -23,6 +23,8 @@ class ExperimentResult:
     # Set by the worker on a pathway job: "pathway" for the binding pathway's
     # result (the primary evidence), "extra" for experiments Lens chose.
     role: str | None = None
+    # shared.evidence.assess, set by Lens: strength, controls, caveats.
+    evidence: dict = field(default_factory=dict)
 
 
 @dataclass
