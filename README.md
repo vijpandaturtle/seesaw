@@ -96,6 +96,8 @@ The pathways are deterministic, and their random baselines are seeded. A rerun o
 
 ## Agents
 
+The agents currently run on Claude.
+
 <table>
 <tr>
 <td width="33%" valign="top">
@@ -109,7 +111,7 @@ Turns a question into a research plan: it chooses a pathway and its inputs, or p
 `search_arxiv` · `search_arxiv_web` · `search_web` · `scrape_url` · `save_research_plan`
 
 **Stack**
-LangGraph ReAct · Claude · Firecrawl
+LangGraph ReAct · Firecrawl
 
 </td>
 <td width="33%" valign="top">
@@ -128,7 +130,7 @@ Runs the plan: the pathway first, then any extra experiments, then an LLM interp
 With `SEESAW_INTERP_BACKEND=lever`, Lens runs six tools on vision-language models instead (LLaVA, Qwen-VL, CLIP). Full catalog: [`shared/lens_tools.py`](shared/lens_tools.py).
 
 **Stack**
-LangGraph StateGraph · Claude · TransformerLens · SAELens · Neuronpedia
+LangGraph StateGraph · TransformerLens · SAELens · Neuronpedia
 
 </td>
 <td width="33%" valign="top">
@@ -139,7 +141,7 @@ LangGraph StateGraph · Claude · TransformerLens · SAELens · Neuronpedia
 Reviews the results bundle like a peer reviewer, treating the pathway's verdict as the primary evidence. It flags methodological issues, unsupported conclusions, and missing experiments, and writes follow-up specs Lens can run directly.
 
 **Stack**
-LangGraph StateGraph · Claude Opus
+LangGraph StateGraph
 
 </td>
 </tr>

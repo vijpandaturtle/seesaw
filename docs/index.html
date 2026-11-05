@@ -228,27 +228,28 @@ seesaw jobs submit "Does the model use the gender a job title implies to choose 
 <section id="agents">
   <div class="wrap">
     <h2>The Three Agents</h2>
+    <p>The agents currently run on Claude.</p>
     <div class="agent-grid">
       <div class="agent-card">
         <div class="emoji">🔭</div>
         <h3>Scout</h3>
         <div class="role">The Research Planner</div>
         <p>A ReAct agent that picks the pathway that answers your question and chooses its inputs, which are checked before you see them. When no pathway fits, it plans the experiments itself. It searches the literature only when you ask it to.</p>
-        <div class="stack">LangGraph ReAct · Claude · Firecrawl</div>
+        <div class="stack">LangGraph ReAct · Firecrawl</div>
       </div>
       <div class="agent-card">
         <div class="emoji">🔬</div>
         <h3>Lens</h3>
         <div class="role">The Experiment Runner</div>
         <p>A LangGraph state machine that runs the pathway first, then any extra experiments in the plan, interprets each result, and can queue follow-ups. It runs text models through TransformerLens and vision-language models through lever.</p>
-        <div class="stack">LangGraph StateGraph · Claude · TransformerLens · SAELens</div>
+        <div class="stack">LangGraph StateGraph · TransformerLens · SAELens</div>
       </div>
       <div class="agent-card">
         <div class="emoji">🪶</div>
         <h3>Quill</h3>
         <div class="role">The Reviewer</div>
         <p>Critiques the results like a peer reviewer, with the pathway's verdict as the primary evidence. It flags methodological gaps and unsupported conclusions, and writes follow-up specs Lens can run.</p>
-        <div class="stack">LangGraph StateGraph · Claude Opus</div>
+        <div class="stack">LangGraph StateGraph</div>
       </div>
     </div>
   </div>

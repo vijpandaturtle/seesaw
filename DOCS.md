@@ -6,6 +6,8 @@ Seesaw is a three-agent pipeline for mechanistic interpretability research:
 - **Lens** runs the plan: the pathway first, then any extra experiments, using the [Lens tools](#lens-tools). Then it interprets each result with an LLM.
 - **Quill** critiques the results, treating the pathway's verdict as the primary evidence. It identifies gaps and writes follow-up experiment specs Lens can run.
 
+The agents currently run on Claude.
+
 A **job** chains the three together with two human approval gates. Jobs are recorded in a job store that the `seesaw` CLI and the dashboard share. Each agent can also run on its own as an MCP server. An **eval suite** (`eval/`) grades all three agents, and it checks its own graders first (see [Evaluation](#evaluation)).
 
 ---
@@ -436,7 +438,7 @@ The eval suite lives in `eval/` and is built in three layers. The core rule: **f
 ```
 eval/
 ├── graders/      # 29 pure grading functions (scout.py, lens.py, quill.py)
-│   ├── base.py               # GraderResult, judge() (LLM-as-judge, claude-opus-4-8)
+│   ├── base.py               # GraderResult, judge() (LLM-as-judge)
 │   └── langsmith_adapter.py  # wrap any grader into a LangSmith evaluator
 ├── fixtures/     # 56 canned artifacts with known verdicts — the grader meta-eval
 ├── tasks/        # 15 live-agent benchmark tasks (*.yaml) + loader
@@ -454,7 +456,7 @@ A grader is a pure function: `(artifact, reference) -> GraderResult` (normalized
 | `llm` | LLM-as-judge over free text | `scout.hypothesis_specificity`, `lens.causal_correlational_honesty`, `quill.gap_recall` |
 | `human` | packages a review payload for an expert; no auto-score | `scout.researcher_would_run`, `quill.matches_expert` |
 
-All 29 are enumerable via `eval.graders.REGISTRY`. The judge model is set in `eval/graders/base.py` (`JUDGE_MODEL`); note it takes no `temperature` — Opus 4.8 rejects sampling params.
+All 29 are enumerable via `eval.graders.REGISTRY`. The judge model is set in `eval/graders/base.py` (`JUDGE_MODEL`); note it takes no `temperature`, because the judge model rejects sampling params.
 
 ### Layer 2 — Fixtures (`eval/fixtures/`): grading the graders
 
