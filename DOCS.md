@@ -2,11 +2,13 @@
 
 Seesaw is a three-agent pipeline for mechanistic interpretability research:
 
-- **Scout** — takes a research question, searches arXiv and the web, produces a research plan
-- **Lens** — runs TransformerLens experiments (logit lens, attention patterns, ablation, activation patching, direct logit attribution) specified by the plan
-- **Quill** — critiques the results, identifies gaps, and generates follow-up experiment specs
+- **Scout** turns a research question into a research plan. It chooses one of Seesaw's [pathways](#pathways) and that pathway's inputs, or plans free-form experiments when none fits. Literature search over arXiv and the web is opt-in.
+- **Lens** runs the plan: the pathway first, then any extra experiments, using the [Lens tools](#lens-tools). Then it interprets each result with an LLM.
+- **Quill** critiques the results, treating the pathway's verdict as the primary evidence. It identifies gaps and writes follow-up experiment specs Lens can run.
 
-An **orchestrator** chains the three together with two human-in-the-loop (HITL) checkpoints. Each agent is also independently runnable as an MCP server. An **eval suite** (`eval/`) grades all three agents — and grades its own graders first (see [Evaluation](#evaluation)).
+The agents currently run on Claude.
+
+A **job** chains the three together with two human approval gates. Jobs are recorded in a job store that the `seesaw` CLI and the dashboard share. Each agent can also run on its own as an MCP server. An **eval suite** (`eval/`) grades all three agents, and it checks its own graders first (see [Evaluation](#evaluation)).
 
 ---
 
@@ -17,18 +19,30 @@ An **orchestrator** chains the three together with two human-in-the-loop (HITL) 
 uv venv .venv --python 3.12
 source .venv/bin/activate
 
-# 2. Install dependencies
-uv pip install -e .
+# 2. Install, with the experiment stack Lens needs (torch, TransformerLens, SAELens)
+uv pip install -e ".[experiments]"
 
-# 3. Add your API keys
+# 3. Add your API key
 cp .env.example .env
-# edit .env — set ANTHROPIC_API_KEY (required) and FIRECRAWL_API_KEY (optional)
+# edit .env: set ANTHROPIC_API_KEY (required)
 
-# 4. Run the full pipeline
-python -m orchestrator.src.main --question "What attention heads mediate indirect object identification in GPT-2 Small?"
+# 4. Run a job on a question with a known answer
+seesaw jobs submit "Does GPT-2 use the gender a job title implies to choose 'she' or 'he'?" \
+  --pathway concept_direction --follow
 ```
 
-You'll be prompted to approve the Scout research plan, then to approve the Lens results before Quill critiques them. Output lands in `scout/outputs/`, `lens/outputs/`, and `quill/outputs/`.
+With `--follow`, the job's log streams in your terminal and you're asked to approve at each gate: first Scout's plan, pathway and inputs, then the Lens results before Quill critiques them. The job runs in a detached local worker, so Ctrl-C stops watching but not the job. Artifacts go to `outputs/jobs/<id>/`.
+
+A plain `uv pip install -e .` installs only Scout, Quill and the orchestrator, which don't need torch. It's enough for `seesaw plan`, `seesaw critique` and the offline eval checks, but not for anything that runs Lens.
+
+| Extra | Adds | Needed for |
+|---|---|---|
+| `experiments` | torch, TransformerLens, SAELens, matplotlib | Lens, the pathways, `seesaw.interp` |
+| `lever` | [lever-interp](https://github.com/vijpandaturtle/lever-interp), pillow | Vision-language models (`SEESAW_INTERP_BACKEND=lever`); install with `experiments` |
+| `eval` | LangSmith, pytest | The eval suite and the test suite |
+| `modal` | Modal | Running Lens experiments on Modal |
+| `postgres` | psycopg | A hosted job store (`DATABASE_URL`) |
+| `all` | All of the above except `lever` | |
 
 ---
 
@@ -38,76 +52,73 @@ Set in `.env` (see `.env.example`):
 
 | Variable | Required | Used by |
 |---|---|---|
-| `ANTHROPIC_API_KEY` | Yes | All three agents (Claude for reasoning/critique) |
-| `FIRECRAWL_API_KEY` | No | Scout's `search_web` and `scrape_url` tools. Without it, those two tools no-op; `search_arxiv` still works. |
-| `DATABASE_URL` | No | Job store. Unset means a local SQLite file, which is all local development needs. |
+| `ANTHROPIC_API_KEY` | Yes | All three agents, and the eval suite's LLM judge |
+| `FIRECRAWL_API_KEY` | No | Scout's `search_web` and `scrape_url`, used only with `--search`. Without it those two return nothing, and `search_arxiv` still works. |
+| `LANGSMITH_API_KEY` | No | The LangSmith eval runner and tracing |
+| `NEURONPEDIA_API_KEY` | No | Neuronpedia's write endpoints. Feature labels and reads need no key. |
+| `SEESAW_NEURONPEDIA_PUBLISH` | No | `1` lets `circuit_tracing` generate attribution graphs on Neuronpedia. Generated graphs and their prompts are public. |
+| `SEESAW_INTERP_BACKEND` | No | `lever` runs Lens on vision-language models; default `seesaw` (see [Interp Backends](#interp-backends-seesaw-and-lever)) |
+| `DATABASE_URL` | No | Job store. Unset means a local SQLite file at `outputs/jobs.db`, which is all local use needs. |
 
-Deployment adds several more — see [Deployment → Environment reference](#environment-reference).
+Deployment adds several more; see [Deployment → Environment reference](#environment-reference).
 
 ---
 
-## Running the Orchestrator
+## The `seesaw` CLI
 
-```bash
-python -m orchestrator.src.main --question "<research question>" [--skip-hitl]
-```
-
-| Flag | Effect |
-|---|---|
-| `--question`, `-q` | Required. The mech interp question for Scout to investigate. |
-| `--skip-hitl` | Skip both approval checkpoints — runs Scout → Lens → Quill straight through with no prompts. Use for automated/batch runs. |
-
-**Pipeline flow** (`orchestrator/src/pipeline.py`):
-
-| Stage | Output | Checkpoint after |
-|---|---|---|
-| Scout | `research_plan.md` | Approve the plan? |
-| Lens | `results_bundle.json` | Send results to Quill? |
-| Quill | `critique_<timestamp>.json` / `.md` | — |
-
-Each stage writes to disk before the next one reads from disk — there's no in-memory handoff. This means you can inspect intermediate output, or re-run a single stage without repeating the others (see below).
-
-### Running a single stage
-
-Each orchestrator client can be called directly if you don't need the full pipeline:
-
-```python
-from orchestrator.src.clients.scout_client import run_scout
-from orchestrator.src.clients.lens_client import run_lens
-from orchestrator.src.clients.quill_client import run_quill
-
-plan_path = run_scout("What heads mediate IOI in GPT-2 Small?")
-bundle, bundle_path = run_lens(plan_path.read_text())
-report, report_path = run_quill(bundle_path)
-```
-
-`scout_client.py` and `lens_client.py` call the agent's LangGraph workflow **in-process** — they do not go through MCP. This is the fast path used by the orchestrator itself.
-
-### Jobs from the terminal
-
-`seesaw run` and the orchestrator above run in your terminal and record nothing. `seesaw jobs` goes through the job store instead, so a job submitted here shows in the dashboard and one queued from the dashboard can be approved here.
-
-```bash
-seesaw jobs submit "Does LLaVA use the image for counting?" --model llava-hf/llava-interleave-qwen-0.5b-hf --follow
-```
+`seesaw` is installed with the package (`seesaw/cli.py`). Every subcommand is a thin call into the library, so anything it does, a script or notebook can do too.
 
 | Command | Does |
 |---|---|
-| `submit "<question>"` | Create a job and start its Scout stage. `--pathway` makes one of seesaw's pathways part of it (Scout chooses its inputs); `--model`, `--auto-approve`, `--follow` |
-| `rerun <id>` | Run a job's pathway again on its approved inputs, as a new job starting at Lens (no Scout). `--model` runs it on another model. See [docs/use-cases.md](docs/use-cases.md#reproducing-a-result) |
-| `list` | Recent jobs, newest first. `--json` for scripts |
-| `show <id>` | Status, artifact paths, error, and what to do next |
-| `approve <id>` | Clear the approval gate and start the next stage. Refused unless the job is still awaiting approval |
-| `retry <id>` | Re-run a failed stage. Refused unless the job is still failed |
+| `seesaw jobs …` | Submit and drive jobs in the job store, the main way to run Seesaw ([below](#jobs)) |
+| `seesaw run "<question>" [--skip-hitl]` | The full Scout → Lens → Quill pipeline in this process. Records no job, uses no pathway, and Scout searches the literature. |
+| `seesaw plan "<question>"` | Scout only: question → research plan |
+| `seesaw critique <results_bundle.json>` | Quill only: results bundle → critique report |
+| `seesaw eval <task_id>` · `seesaw eval --list` | Run one eval task against the live agents, or list the tasks |
+| `seesaw fixtures [--llm [AGENT]]` | The grader meta-eval. It's offline and free by default, and `--llm` runs the judge fixtures, which cost API calls. |
+
+`python -m orchestrator.src.main --question "<question>" [--skip-hitl]` is the same as `seesaw run`.
+
+### Jobs
+
+```bash
+seesaw jobs submit "<question>" [--pathway auto|none|<name>] [--model gpt2] [--search] [--auto-approve] [--follow]
+```
+
+A job runs Scout, stops at a gate for your approval, runs Lens, stops at a second gate, then runs Quill. The job store records the job, so a job submitted here shows in the dashboard, and one queued from the dashboard can be approved here.
+
+| Command | Does |
+|---|---|
+| `submit "<question>"` | Create a job and start its Scout stage. Options below. |
+| `list` | Recent jobs, newest first. `--limit`, `--json` |
+| `show <id>` | Status, artifact paths, error, and what to do next. `--json` |
+| `approve <id>` | Clear the approval gate and start the next stage. Refused unless the job is awaiting approval. |
+| `retry <id>` | Re-run a failed stage. Refused unless the job has failed. A retried Scout stage chooses its pathway again. |
+| `rerun <id>` | Run a job's pathway again on its approved inputs, as a new job starting at Lens (Scout doesn't run again). `--model` runs it on another model. See [docs/use-cases.md](docs/use-cases.md#reproducing-a-result). |
 | `cancel <id>` | Stop the job |
-| `logs <id>` | Worker output. `-f` streams until the job stops |
+| `logs <id>` | Worker output. `-n` lines, `-f` streams until the job stops. |
 | `open <id>` | Open the job in the dashboard at `SEESAW_WEB_URL` (default `http://localhost:3000`) |
 
-`--follow` streams the log and, at an approval gate, asks whether to approve. Ctrl-C stops watching, not the job: the worker runs detached.
+`submit` options:
 
-Who runs a stage is picked as the dashboard picks it: the Modal function when `MODAL_RUN_STAGE_URL` is set, otherwise a detached local worker writing to `outputs/job_logs/<id>.log`. `--runner queue` starts nothing and leaves the job for `python -m orchestrator.src.worker --poll`. Whatever `DATABASE_URL` points at is the store the commands use, so with the production URL in `.env`, `submit` queues a real job.
+| Option | Effect |
+|---|---|
+| `--pathway auto` (default) | Scout reads every pathway's summary and picks the one that answers the question, with a one-sentence reason. If none fits, it picks none and plans the experiments itself. |
+| `--pathway <name>` | That pathway runs, and Scout only chooses its inputs. Use this when you know which one you want, and always for evaluation. |
+| `--pathway none` | No pathway; Scout plans freely |
+| `--model` | The model Lens targets. The default is `gpt2`. |
+| `--search` | Let Scout search arXiv and the web while planning. It's off by default, and without it Scout cites no papers as sources. |
+| `--auto-approve` | Run all stages without stopping at the gates |
+| `--follow`, `-f` | Stream the log, and ask whether to approve at each gate |
+| `--runner` | Who runs the stage: `auto` (default), `local`, `modal` or `queue` |
 
-To run one of the hand-coded pathways as a job, and for sample questions sorted by what you want to find out, see **[docs/use-cases.md](docs/use-cases.md)**.
+`submit`, `approve`, `retry` and `rerun` all accept `--runner` and `--follow`.
+
+Scout's pathway inputs are checked before the gate. The lists must line up, and every answer must be a single token for the model. If they don't, Scout gets the problems back to fix, up to twice. At the gate you see the plan, the pathway Scout chose and why, and its inputs.
+
+**Who runs a stage.** By default (`--runner auto`), the stage runs on the Modal function when `MODAL_RUN_STAGE_URL` is set. Otherwise it runs in a detached local worker that writes to `outputs/job_logs/<id>.log`. `--runner queue` starts nothing and leaves the job for `python -m orchestrator.src.worker --poll`. The commands use whatever store `DATABASE_URL` points at, so if `.env` holds the production URL, `submit` queues a real job.
+
+**Where artifacts go.** Each job has its own folder, `outputs/jobs/<id>/`, holding the plan, the results bundle, the pathway report, plots and the critique. Under `SEESAW_ARTIFACTS_DIR` it's `$SEESAW_ARTIFACTS_DIR/jobs/<id>/`. `seesaw run`, `plan` and `critique` write to each agent's own `scout/outputs/`, `lens/outputs/` and `quill/outputs/` instead.
 
 #### The job timeline
 
@@ -135,6 +146,106 @@ When a job stops at an approval gate, the worker writes its `cost` column: what 
 from shared.db import events
 events.list_events("b1967577")     # oldest first, data decoded
 ```
+
+---
+
+## Pathways
+
+A pathway is a fixed, hand-coded investigation that ends in a verdict ([`seesaw/pathways/`](seesaw/pathways/)). It's the expert baseline Lens is judged against. It also gives a job a result that doesn't depend on an LLM reading the plan well.
+
+| Pathway | Question it answers | Inputs |
+|---|---|---|
+| `circuit_discovery` | What mechanism does the model use for this task? Nominate heads, verify heads and MLPs by patching, check the circuit is faithful. | `prompts`, `positive_tokens`, `negative_tokens`; optional `corrupted_prompts`, `reference_prompts` |
+| `concept_direction` | Is a concept a direction the model uses, and can it be steered safely? Fit on half the pairs, remove and steer on the other half, check it bakes into the weights. | `prompts`, `counterfactual_prompts`, `positive_tokens`, `negative_tokens`; optional `control_prompts`, `control_texts` |
+| `probe_monitor` | Would a probe on the activations make a good detector? Train, test on held-out texts, compare with text-only baselines. | `prompts`, `contrast_prompts`, `test_prompts`, `test_contrast_prompts` |
+| `spurious_audit` | Does the answer depend on an attribute it shouldn't, and can LEACE erase it without breaking the task? | `prompts`, `counterfactual_prompts`, `positive_tokens`, `negative_tokens`; optional `control_texts` |
+| `factual_recall` | Where does the model retrieve these facts? Causal tracing over layers and positions. | `prompts`, `subjects`, `positive_tokens` |
+| `editing_comparison` | Is the layer where a fact is traced the best layer to edit it? ROME at every layer vs tracing. | `prompts`, `subjects`, `positive_tokens`, `target_tokens`, `paraphrase_prompts`, `neighborhood_prompts`, `neighborhood_tokens` |
+| `model_diffing` | What did a fine-tune, quantisation or edit change, and in which weights? | `prompts`, `other_model` |
+| `feature_explain` | Which SAE features drive this output, and what are they? Sweeps GPT-2 small SAEs (gpt2 only). | `prompts`, `positive_tokens`, `negative_tokens` |
+
+`attribute_audit` is `concept_direction` under its older name. It's kept so earlier jobs can be rerun.
+
+- **Answer tokens are single tokens.** Most pathways score one answer token against one distractor per prompt, so a good question has an answer the model gives as one next token, such as `" Mary"` vs `" John"`. `probe_monitor` and `model_diffing` take texts instead.
+- **Verdicts are deterministic.** Each pathway has a fixed verdict vocabulary, and its random baselines are seeded. The same pathway version on the same model and inputs gives the same verdict. Each pathway carries a `version`, and results are only comparable within one.
+- **Every step is labelled** with its evidence strength (correlational, estimate or causal) and whether its controls ran. See [`shared/evidence.py`](shared/evidence.py).
+- **Known answers are tested.** [`tests/test_pathways_gpt2.py`](tests/test_pathways_gpt2.py) runs each pathway on a case whose answer is known on GPT-2 small.
+
+Sample questions for each pathway, sorted by what you want to find out, are in **[docs/use-cases.md](docs/use-cases.md)**. The input definitions Scout is given are in [`seesaw/pathways/catalog.py`](seesaw/pathways/catalog.py).
+
+---
+
+## Lens Tools
+
+Lens's tools are listed once, in [`shared/lens_tools.py`](shared/lens_tools.py). Scout's plan template, Lens's prompts, Quill's follow-up prompt and the eval graders all read that list. Each tool is labelled by the kind of evidence it gives:
+
+- **descriptive** shows what the model represents or attends to. It makes no causal claim.
+- **estimate** is a gradient-based approximation of a causal effect. It ranks candidates cheaply, but its numbers should never be reported as effects.
+- **causal** is an intervention: it changes the model and measures what follows.
+
+**Text models** (`seesaw` backend, the default), 18 tools:
+
+| Kind | Tools |
+|---|---|
+| descriptive | `logit_lens` · `attention_pattern` · `direct_logit_attribution` · `linear_probe` · `feature_search` · `counterfactual` |
+| estimate | `attribution_patching` · `feature_attribution` · `edge_attribution_patching` · `circuit_tracing` (gemma-2-2b only, from Neuronpedia) |
+| causal | `ablation` · `activation_patching` · `head_patching` · `circuit_evaluation` · `path_patching` · `steering_vector` · `directional_ablation` · `feature_clamping` |
+
+Lens chains them nominate-then-verify. An estimate or descriptive tool picks candidates, and a causal tool tests them:
+
+- `attribution_patching` or `direct_logit_attribution` → `head_patching` or `ablation` with `heads` → `circuit_evaluation`
+- `edge_attribution_patching` → `path_patching`
+- `counterfactual` → `linear_probe` → `directional_ablation` or `steering_vector`
+- `feature_attribution` → `feature_clamping`
+
+**Vision-language models** (`lever` backend), 6 tools: `logit_lens`, `clip_direct_effects` (descriptive), and `vision_ablation`, `image_token_ablation`, `activation_patching`, `clip_head_ablation` (causal). See [Interp Backends](#interp-backends-seesaw-and-lever).
+
+The pathways use further library functions that aren't Lens tools: causal tracing, MLP patching, ROME, LEACE, probe transfer and weight-level model diffing. They're in `seesaw.interp`.
+
+---
+
+## Library API
+
+Everything the CLI does is available from Python. `import seesaw` is fast. It loads torch and LangGraph only when you first use something that needs them.
+
+```python
+import seesaw
+
+# Agents
+seesaw.run_pipeline("What heads mediate IOI in GPT-2 Small?", skip_hitl=True)
+plan_path           = seesaw.run_scout("…question…")
+bundle, bundle_path = seesaw.run_lens(plan_path.read_text())
+report, report_path = seesaw.run_quill(bundle_path)
+
+# A pathway on fixed inputs, no agents and no job: what the known-answer tests do
+from pathlib import Path
+from seesaw.experiments import load_model
+from seesaw.pathways import circuit_discovery
+
+model = load_model("gpt2")
+result = circuit_discovery.run(model, prompts, positive_tokens, negative_tokens, Path("out"))
+print(result.verdict)
+print(result.to_markdown())     # one page: verdict, the evidence behind it, then the details
+
+# Single experiments by model name (the model is loaded on first use)
+from seesaw import experiments
+experiments.ablation("gpt2", prompts=[...], positive_tokens=[" Mary"], negative_tokens=[" John"])
+
+# The interp toolkit itself, grouped by technique
+from seesaw.interp.causal_interventions import ablation, causal_tracing
+from seesaw.interp.model_editing import rome, leace
+
+# Eval suite
+from seesaw import evals
+evals.check_offline()
+evals.run_task(evals.load_tasks()["quill_weak_bundle_1"])
+```
+
+`seesaw.interp` is grouped by technique: `black_box`, `causal_interventions`, `circuit_finding`, `feature_extraction`, `model_diffing`, `model_editing`, `probing`, `steering`, `visualization`. Lens's MCP tools and the pathways both wrap it. `seesaw.vlm` is the vision-language counterpart, on lever.
+
+### Running a single stage
+
+The agent functions above are the orchestrator's own clients (`orchestrator/src/clients/`). `run_scout` and `run_lens` call the agent's LangGraph workflow **in-process**, without going through MCP. Each stage writes to disk before the next one reads from disk, with no in-memory handoff. That means you can inspect intermediate output, or re-run one stage without repeating the others.
 
 ---
 
@@ -167,6 +278,8 @@ python -m scout.mcp_server.src.server
 
 Tools exposed: `search_arxiv`, `search_arxiv_web`, `search_web`, `scrape_url`, `save_research_plan`.
 Resource: `system://status`. Prompt: `research_instructions`.
+
+`build_agent(search=False)` gives Scout only `save_research_plan`. That's what a job uses unless it was submitted with `--search`. Without search, Scout states its expectations as hypotheses and cites nothing as a source.
 
 ### Lens
 
@@ -264,6 +377,19 @@ and stay on the seesaw catalog, so evals don't score lever runs yet.
 
 ## Directory Structure
 
+```
+seesaw/          # the library and CLI: cli.py, jobs_cli.py, experiments.py, evals.py
+├── interp/      # the interp toolkit, grouped by technique (no agents)
+├── pathways/    # the hand-coded pathways, and catalog.py (their inputs)
+└── vlm/         # vision-language tools on lever
+scout/ lens/ quill/   # the three agents, each an MCP server (layout below)
+orchestrator/    # pipeline.py (seesaw run), worker.py (runs job stages), clients/, modal_app.py
+shared/          # lens_tools.py (the tool catalog), evidence.py, db/ (job store and timeline)
+eval/            # graders, fixtures, tasks, rubrics, runner, and eval/tests/
+tests/           # the unit and known-answer test suite (pytest tests/)
+docs/            # use-cases.md, research-methodology.md
+```
+
 All three agents share the same internal layout:
 
 ```
@@ -317,7 +443,7 @@ The eval suite lives in `eval/` and is built in three layers. The core rule: **f
 ```
 eval/
 ├── graders/      # 29 pure grading functions (scout.py, lens.py, quill.py)
-│   ├── base.py               # GraderResult, judge() (LLM-as-judge, claude-opus-4-8)
+│   ├── base.py               # GraderResult, judge() (LLM-as-judge)
 │   └── langsmith_adapter.py  # wrap any grader into a LangSmith evaluator
 ├── fixtures/     # 56 canned artifacts with known verdicts — the grader meta-eval
 ├── tasks/        # 15 live-agent benchmark tasks (*.yaml) + loader
@@ -335,18 +461,19 @@ A grader is a pure function: `(artifact, reference) -> GraderResult` (normalized
 | `llm` | LLM-as-judge over free text | `scout.hypothesis_specificity`, `lens.causal_correlational_honesty`, `quill.gap_recall` |
 | `human` | packages a review payload for an expert; no auto-score | `scout.researcher_would_run`, `quill.matches_expert` |
 
-All 29 are enumerable via `eval.graders.REGISTRY`. The judge model is set in `eval/graders/base.py` (`JUDGE_MODEL`); note it takes no `temperature` — Opus 4.8 rejects sampling params.
+All 29 are enumerable via `eval.graders.REGISTRY`. The judge model is set in `eval/graders/base.py` (`JUDGE_MODEL`); note it takes no `temperature`, because the judge model rejects sampling params.
 
 ### Layer 2 — Fixtures (`eval/fixtures/`): grading the graders
 
 Each fixture is a canned artifact plus the verdict its grader **must** produce (`expected: pass | fail | na`). Every auto-gradable grader has at least one pass **and** one fail fixture, so a grader that always says yes (or always says no) is caught immediately. LLM-grader fixtures use a dead-band: pass requires score ≥ 0.6, fail requires ≤ 0.4; anything between is `indeterminate` and flags the fixture or judge for review rather than flapping.
 
 ```bash
-# Code-grader fixtures — free, offline, run whenever you touch a grader
-python -c "from eval.fixtures import check_offline; print(check_offline()['mismatches'] or 'all green')"
+# Code-grader fixtures: free, offline, run whenever you touch a grader
+seesaw fixtures
 
-# LLM-grader fixtures — real judge calls (~24), run when you change the judge or rubrics
-python -c "from dotenv import load_dotenv; load_dotenv(); from eval.fixtures import check_llm; print(check_llm(agent='scout'))"
+# LLM-grader fixtures: real judge calls (~24), run when you change the judge or rubrics
+seesaw fixtures --llm          # all agents
+seesaw fixtures --llm scout    # one agent
 ```
 
 A mismatch means the grader **or the fixture label** is wrong — read the judge's reasoning in the result before deciding which (this has happened: an ambiguous fixture scored exactly 0.5 and the dead-band caught it).
@@ -368,8 +495,8 @@ Grader `type` vocabulary (validated by `eval/tasks/loader.py`):
 Handlers never silently pass: a missing test file or unimplemented `state_check` key surfaces as an explicit error result.
 
 ```bash
-python -m eval.runner --list                          # all tasks
-python -m eval.runner quill_weak_bundle_1             # run one locally → outputs/eval_runs/*.json
+seesaw eval --list                                    # all tasks
+seesaw eval quill_weak_bundle_1                       # run one locally → outputs/eval_runs/*.json
 python -m eval.runner.langsmith_runner --all-cheap    # run non-pipeline tasks as a LangSmith experiment
 ```
 
@@ -562,6 +689,8 @@ python -m lens.mcp_server.src.server
 ---
 
 ## Troubleshooting
+
+**`ModuleNotFoundError: No module named 'transformer_lens'` (or `torch`)** means the experiment stack isn't installed. Lens, the pathways and `seesaw run` need it: `uv pip install -e ".[experiments]"`.
 
 **`ModuleNotFoundError` for `lens`, `scout`, `quill`, `orchestrator`, or `shared`** — these are namespace packages (no top-level `__init__.py`), so they only resolve correctly when the project root is on `sys.path`. Run commands from the repo root, or with `python -m <package>.<module>` rather than `python <path>/file.py`.
 
