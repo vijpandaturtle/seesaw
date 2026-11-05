@@ -48,17 +48,14 @@ __WORKFLOW__
 
 ## Research Plan Format
 
-Your final output passed to `save_research_plan` MUST follow this exact structure:
+Your final output passed to `save_research_plan` MUST follow this exact structure. Start
+directly with `## Background`: no title, status line or horizontal rule above it.
 
 ```
-# Research Plan: <research_question>
-
-**Status**: Draft
-
----
-
 ## Background
-<2-3 paragraphs summarising the current state of knowledge on this topic>
+<3-5 short bullets: what is already known that this plan builds on, and what it means for the
+experiments (which components, layers or tokens to look at, which controls matter). Practical
+only: no history, no general overview, no restating the question.>
 
 ## Key Papers & Resources
 <bullet list — title, authors, year, one-line description, URL>
