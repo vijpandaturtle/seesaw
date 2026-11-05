@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="theme-color" content="#dceaff">
 <title>Seesaw - AI Safety</title>
-<meta name="description" content="Seesaw is a multi-agent system that automates the hypothesis → experiment → critique loop in mechanistic interpretability research.">
+<meta name="description" content="Seesaw is a multi-agent system that automates the hypothesis → experiment → critique loop in mechanistic interpretability research, with eight hand-coded pathways checked against known answers.">
 <link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>⚖️</text></svg>">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -110,6 +110,15 @@
   table.tools th { font: 500 12px var(--mono); text-transform: uppercase; letter-spacing: .06em; color: var(--muted); border-top: 0; }
   table.tools td.tool-name { font: 500 13px var(--mono); color: var(--accent); white-space: nowrap; padding-right: 24px; }
 
+  /* Code */
+  pre.code {
+    font: 13px/1.6 var(--mono); background: var(--text); color: #e2e8f0;
+    padding: 18px 20px; border-radius: 14px; overflow-x: auto; margin: 8px 0 20px;
+  }
+  pre.code .c { color: #94a3b8; }
+  .kind { font: 500 11px var(--mono); text-transform: uppercase; letter-spacing: .05em; color: var(--accent-bright); }
+  td .names { font: 13px/1.8 var(--mono); color: var(--text); }
+
   /* Stats */
   .stat-grid {
     display: grid; grid-template-columns: repeat(4, 1fr); margin: 32px 0 0;
@@ -145,6 +154,8 @@
     <a class="brand" href="#">Seesaw<span>.</span></a>
     <nav>
       <a href="#overview">Overview</a>
+      <a href="#start">Get started</a>
+      <a href="#pathways">Pathways</a>
       <a href="#agents">Agents</a>
       <a href="#tools">Tools</a>
       <a href="#evals">Evals</a>
@@ -169,19 +180,51 @@
 <section id="overview">
   <div class="wrap">
     <h2>Overview</h2>
-    <p>A human researcher provides a research question. Three agents handle the planning, execution, and review with human-in-the-loop checkpoints between every stage to ensure high quality results.</p>
+    <p>You ask a research question. Scout picks one of eight hand-coded pathways and chooses its inputs, and you approve both before anything runs on a model. Lens runs the pathway, and Quill reviews the result like a peer reviewer. Every result is labelled with how strong its evidence is (correlational, estimate or causal) and whether its controls ran.</p>
     <div class="pipeline">
       <span class="stage">Scout</span>
-      <span class="arrow">research question → Research Plan →</span>
+      <span class="arrow">question → research plan →</span>
       <span class="stage">Lens</span>
-      <span class="arrow">Research Plan → ExperimentBundle →</span>
+      <span class="arrow">plan → results bundle →</span>
       <span class="stage">Quill</span>
-      <span class="arrow">ExperimentBundle → CritiqueReport</span>
+      <span class="arrow">bundle → critique report</span>
     </div>
     <img class="diagram" src="assets/seesaw-v0.jpg" alt="Seesaw v0 architecture diagram">
   </div>
 </section>
 
+<section id="start">
+  <div class="wrap">
+    <h2>Get started</h2>
+    <p>Install with the experiment stack, add an Anthropic key, and ask a question whose answer is already known, so you can check the verdict.</p>
+<pre class="code"><span class="c"># install (Lens needs torch + TransformerLens)</span>
+uv venv .venv --python 3.12 &amp;&amp; source .venv/bin/activate
+uv pip install -e ".[experiments]"
+cp .env.example .env   <span class="c"># set ANTHROPIC_API_KEY</span>
+
+<span class="c"># run a job, approving at each gate as it goes</span>
+seesaw jobs submit "Does the model use the gender a job title implies to choose 'she' or 'he'?" \
+  --pathway concept_direction --follow</pre>
+    <p>Leave out <code>--pathway</code> and Scout picks one, or none, and plans the experiments itself. <code>--search</code> lets it search arXiv and the web. <code>seesaw jobs rerun &lt;id&gt; --model &lt;other&gt;</code> runs the same experiment on another model. Sample questions for every pathway are in <a href="https://github.com/vijpandaturtle/seesaw/blob/main/docs/use-cases.md">the use-cases guide</a>.</p>
+  </div>
+</section>
+<section id="pathways">
+  <div class="wrap">
+    <h2>Pathways</h2>
+    <p>Fixed investigations with a deterministic verdict, each checked against a known answer. They're the expert baseline Lens is judged against. Pathways run on any TransformerLens model, and rerunning a job with <code>--model</code> repeats the same experiment on another one, so models can be compared on identical inputs.</p>
+    <table class="tools">
+      <tr><th>Pathway</th><th>Answers</th></tr>
+      <tr><td class="tool-name">circuit_<wbr>discovery</td><td>What mechanism does the model use? Nominate heads, verify heads and MLPs by patching, and check the circuit is faithful.</td></tr>
+      <tr><td class="tool-name">concept_<wbr>direction</td><td>Is a concept a direction the model uses, and can it be removed or steered safely, beyond random directions?</td></tr>
+      <tr><td class="tool-name">probe_<wbr>monitor</td><td>Would a probe on the activations make a better detector than the words alone?</td></tr>
+      <tr><td class="tool-name">spurious_<wbr>audit</td><td>Does the answer depend on an attribute it shouldn't, and can LEACE erase it without breaking the task?</td></tr>
+      <tr><td class="tool-name">factual_<wbr>recall</td><td>Where does the model retrieve a fact? Causal tracing over layers and positions.</td></tr>
+      <tr><td class="tool-name">editing_<wbr>comparison</td><td>Is the layer where a fact is traced the best layer to edit it with ROME?</td></tr>
+      <tr><td class="tool-name">model_<wbr>diffing</td><td>What did a fine-tune change, and in which weights?</td></tr>
+      <tr><td class="tool-name">feature_<wbr>explain</td><td>Which SAE features drive this output, and what are they? (Needs a model with public SAEs; GPT-2 small for now.)</td></tr>
+    </table>
+  </div>
+</section>
 <section id="agents">
   <div class="wrap">
     <h2>The Three Agents</h2>
@@ -190,21 +233,21 @@
         <div class="emoji">🔭</div>
         <h3>Scout</h3>
         <div class="role">The Research Planner</div>
-        <p>A ReAct agent that searches arXiv and the web, then commits to a falsifiable hypothesis and a concrete experiment sequence for Lens to run.</p>
+        <p>A ReAct agent that picks the pathway that answers your question and chooses its inputs, which are checked before you see them. When no pathway fits, it plans the experiments itself. It searches the literature only when you ask it to.</p>
         <div class="stack">LangGraph ReAct · Claude · Firecrawl</div>
       </div>
       <div class="agent-card">
         <div class="emoji">🔬</div>
         <h3>Lens</h3>
         <div class="role">The Experiment Runner</div>
-        <p>A six-node LangGraph state machine that executes TransformerLens experiments from the plan, interprets each result, and can queue adaptive follow-ups.</p>
-        <div class="stack">LangGraph StateGraph · Claude · TransformerLens</div>
+        <p>A LangGraph state machine that runs the pathway first, then any extra experiments in the plan, interprets each result, and can queue follow-ups. It runs text models through TransformerLens and vision-language models through lever.</p>
+        <div class="stack">LangGraph StateGraph · Claude · TransformerLens · SAELens</div>
       </div>
       <div class="agent-card">
         <div class="emoji">🪶</div>
         <h3>Quill</h3>
         <div class="role">The Reviewer</div>
-        <p>Critiques the experiment bundle like a peer reviewer — flags methodological gaps and unsupported conclusions, and generates executable follow-up specs.</p>
+        <p>Critiques the results like a peer reviewer, with the pathway's verdict as the primary evidence. It flags methodological gaps and unsupported conclusions, and writes follow-up specs Lens can run.</p>
         <div class="stack">LangGraph StateGraph · Claude Opus</div>
       </div>
     </div>
@@ -214,15 +257,14 @@
 <section id="tools">
   <div class="wrap">
     <h2>Lens's Tools</h2>
-    <p>Five TransformerLens-based diagnostic and causal tools, each independently callable.</p>
+    <p>18 tools for text models, labelled by the kind of evidence they give. Lens chains them nominate-then-verify: an estimate picks candidates, and a causal intervention tests them.</p>
     <table class="tools">
-      <tr><th>Tool</th><th>Answers</th></tr>
-      <tr><td class="tool-name">logit_lens</td><td>Where across layers does the model commit to an answer?</td></tr>
-      <tr><td class="tool-name">attention_pattern</td><td>Which tokens does each head attend to?</td></tr>
-      <tr><td class="tool-name">direct_logit_attribution</td><td>Which components write the final prediction?</td></tr>
-      <tr><td class="tool-name">ablation</td><td>Is this component causally necessary?</td></tr>
-      <tr><td class="tool-name">activation_patching</td><td>Which layer and position carries the signal?</td></tr>
+      <tr><th>Kind</th><th>Tools</th></tr>
+      <tr><td class="kind">Descriptive</td><td><div class="names">logit_lens · attention_pattern · direct_logit_attribution · linear_probe · feature_search · counterfactual</div>What the model represents or attends to. No causal claim.</td></tr>
+      <tr><td class="kind">Estimate</td><td><div class="names">attribution_patching · feature_attribution · edge_attribution_patching · circuit_tracing</div>Gradient-based approximations that rank candidates cheaply. Never reported as effects.</td></tr>
+      <tr><td class="kind">Causal</td><td><div class="names">ablation · activation_patching · head_patching · circuit_evaluation · path_patching · steering_vector · directional_ablation · feature_clamping</div>Interventions: change the model and measure what follows.</td></tr>
     </table>
+    <p style="margin-top:16px">Six more tools cover vision-language models (LLaVA, Qwen-VL, CLIP), including vision ablation, image-token ablation and CLIP head ablation.</p>
   </div>
 </section>
 
@@ -242,7 +284,7 @@
 <section id="deployment">
   <div class="wrap">
     <h2>Deployment</h2>
-    <p>Nothing always-on. Scout, Quill, and Lens's graph run on a Modal CPU app; Lens's five experiment tools run on a Modal GPU app with per-second billing. A thin Next.js dashboard on Vercel queues jobs and reads state from a Postgres (Neon) job store — the dashboard never executes an agent directly.</p>
+    <p>Nothing always-on. Scout, Quill, and Lens's graph run on a Modal CPU app; Lens's experiment tools run on a Modal GPU app with per-second billing. A thin Next.js dashboard on Vercel queues jobs and reads state from a Postgres (Neon) job store — the dashboard never executes an agent directly.</p>
   </div>
 </section>
 

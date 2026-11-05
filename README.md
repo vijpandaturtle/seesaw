@@ -31,7 +31,7 @@ Seesaw automates the hypothesis → experiment → critique loop in mechanistic 
 
 </div>
 
-Most questions don't need a free-form plan. Seesaw ships eight **pathways**: fixed, hand-coded investigations that end in a verdict, each checked against a known answer on GPT-2 small. Scout picks the pathway that fits your question and chooses its inputs. You approve both before anything runs on a model. Lens runs the pathway, and Quill critiques the result.
+Most questions don't need a free-form plan. Seesaw ships eight **pathways**: fixed, hand-coded investigations that end in a verdict, each checked against a known answer. They run on any TransformerLens model. Scout picks the pathway that fits your question and chooses its inputs. You approve both before anything runs on a model. Lens runs the pathway, and Quill critiques the result.
 
 Every result is labelled with how strong its evidence is (correlational, estimate, or causal) and whether its controls ran. Each agent can also run on its own as an [MCP](https://modelcontextprotocol.io) server; see [DOCS.md](DOCS.md).
 
@@ -49,7 +49,7 @@ cp .env.example .env                 # set ANTHROPIC_API_KEY
 Then ask a question whose answer is already known, so you can check the verdict:
 
 ```bash
-seesaw jobs submit "Does GPT-2 use the gender a job title implies to choose 'she' or 'he'?" \
+seesaw jobs submit "Does the model use the gender a job title implies to choose 'she' or 'he'?" \
   --pathway concept_direction --follow
 ```
 
