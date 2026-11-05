@@ -5,7 +5,7 @@
 
 Writes outputs/pathways/<case>/report.md (the pathway's one-page verdict and
 evidence) next to every plot its steps saved. The same cases are asserted in
-tests/test_pathways_gpt2.py; this script is for looking at them.
+tests/test_pathways_models.py; this script is for looking at them.
 
 Needs the [experiments] extra; feature_explain downloads one GPT-2 SAE
 (~150 MB) and calls Neuronpedia for feature labels.

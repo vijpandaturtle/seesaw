@@ -200,11 +200,11 @@
 <pre class="code"><span class="c"># install (Lens needs torch + TransformerLens)</span>
 uv venv .venv --python 3.12 &amp;&amp; source .venv/bin/activate
 uv pip install -e ".[experiments]"
-cp .env.example .env   <span class="c"># set ANTHROPIC_API_KEY</span>
+cp .env.example .env   <span class="c"># set ANTHROPIC_API_KEY (and HF_TOKEN for Gemma or Llama)</span>
 
 <span class="c"># run a job, approving at each gate as it goes</span>
 seesaw jobs submit "Does the model use the gender a job title implies to choose 'she' or 'he'?" \
-  --pathway concept_direction --follow</pre>
+  --pathway concept_direction --model Qwen/Qwen2.5-1.5B --follow</pre>
     <p>Leave out <code>--pathway</code> and Scout picks one, or none, and plans the experiments itself. <code>--search</code> lets it search arXiv and the web. <code>seesaw jobs rerun &lt;id&gt; --model &lt;other&gt;</code> runs the same experiment on another model. Sample questions for every pathway are in <a href="https://github.com/vijpandaturtle/seesaw/blob/main/docs/use-cases.md">the use-cases guide</a>.</p>
   </div>
 </section>
@@ -221,7 +221,7 @@ seesaw jobs submit "Does the model use the gender a job title implies to choose 
       <tr><td class="tool-name">factual_<wbr>recall</td><td>Where does the model retrieve a fact? Causal tracing over layers and positions.</td></tr>
       <tr><td class="tool-name">editing_<wbr>comparison</td><td>Is the layer where a fact is traced the best layer to edit it with ROME?</td></tr>
       <tr><td class="tool-name">model_<wbr>diffing</td><td>What did a fine-tune change, and in which weights?</td></tr>
-      <tr><td class="tool-name">feature_<wbr>explain</td><td>Which SAE features drive this output, and what are they? (Needs a model with public SAEs; GPT-2 small for now.)</td></tr>
+      <tr><td class="tool-name">feature_<wbr>explain</td><td>Which SAE features drive this output, and what are they? (Needs published SAEs: Gemma-2-2B or Qwen2.5-7B-Instruct.)</td></tr>
     </table>
   </div>
 </section>

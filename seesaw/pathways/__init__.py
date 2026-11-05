@@ -38,7 +38,7 @@ Built:
     feature_explain    — which SAE features drive this output, and what are they?
 
 Each is checked against a known answer on GPT-2 small in
-tests/test_pathways_gpt2.py.
+tests/test_pathways_models.py.
 """
 
 from .result import PathwayResult

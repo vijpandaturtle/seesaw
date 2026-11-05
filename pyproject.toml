@@ -7,7 +7,7 @@ name = "seesaw"
 version = "0.1.0"
 description = "A multi-agent framework for automated mechanistic interpretability research"
 readme = "README.md"
-requires-python = ">=3.10"
+requires-python = ">=3.11,<3.13"
 license = { text = "Apache-2.0" }
 keywords = ["mechanistic-interpretability", "agents", "transformer-lens", "langgraph", "mcp"]
 

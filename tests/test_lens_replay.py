@@ -14,7 +14,11 @@ from __future__ import annotations
 
 import json
 
-from lens.mcp_server.src.workflows import lens_workflow
+import pytest
+
+pytest.importorskip("transformer_lens")  # the workflow imports Lens's tools
+
+from lens.mcp_server.src.workflows import lens_workflow  # noqa: E402
 
 IOI = ["When Mary and John went to the store, John gave a drink to"]
 EXPERIMENTS = [
