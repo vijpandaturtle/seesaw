@@ -1,6 +1,5 @@
 """Client for the Scout research-planning agent."""
 
-import time
 from pathlib import Path
 from typing import Callable
 
@@ -39,8 +38,8 @@ def run_scout(
     Scout's LLM picks its own descriptive filename when saving (e.g.
     "gender_bias_attention_heads_research_plan.md", not always the
     literal "research_plan.md"), so instead of checking a fixed name,
-    this looks for the newest "*research_plan*.md" file written to
-    output_dir during this run.
+    this looks for the newest "*research_plan*.md" file that is new or
+    changed in output_dir during this run.
 
     With `check`, each saved plan is checked and, while it returns errors,
     Scout is sent them on the same thread (so it keeps its research) and
@@ -91,9 +90,17 @@ def run_scout(
     return plan_path
 
 
+def _plans(output_dir: Path) -> dict[Path, tuple[int, bytes]]:
+    """Every saved plan in output_dir, with its mtime (ns) and content."""
+    return {p: (p.stat().st_mtime_ns, p.read_bytes()) for p in output_dir.glob("*research_plan*.md")}
+
+
 def _turn(agent, config: dict, message: str, output_dir: Path, verbose: bool) -> Path:
     """Send one user message, stream the agent, return the plan it saved."""
-    start_time = time.time()
+    # Snapshot, not a start time: a file's mtime comes from the filesystem's
+    # clock, which on Linux is coarse and can read a few ms behind time.time(),
+    # so a plan saved straight after the turn starts could look older than it.
+    before = _plans(output_dir) if output_dir.exists() else {}
     for chunk in agent.stream(
         {"messages": [{"role": "user", "content": message}]},
         config=config,
@@ -107,13 +114,11 @@ def _turn(agent, config: dict, message: str, output_dir: Path, verbose: bool) ->
             if isinstance(last.content, str):
                 print(last.content[:500])
 
-    candidates = [
-        p for p in output_dir.glob("*research_plan*.md")
-        if p.stat().st_mtime >= start_time
-    ]
+    after = _plans(output_dir) if output_dir.exists() else {}
+    candidates = [p for p, seen in after.items() if before.get(p) != seen]   # new or rewritten
     if not candidates:
         raise RuntimeError(
             f"Scout completed but no *research_plan*.md file appeared in {output_dir}. "
             "Check that save_research_plan was called."
         )
-    return max(candidates, key=lambda p: p.stat().st_mtime)
+    return max(candidates, key=lambda p: after[p][0])

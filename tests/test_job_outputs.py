@@ -80,6 +80,7 @@ def test_scout_saves_into_the_given_folder_only(tmp_path):
 
 
 def test_lens_bundle_goes_to_the_states_folder(tmp_path):
+    pytest.importorskip("transformer_lens")  # the nodes package loads Lens's tools
     from lens.mcp_server.src.nodes.collect_results import collect_results
 
     collect_results({"research_question": "q", "model_name": "m", "results": [],

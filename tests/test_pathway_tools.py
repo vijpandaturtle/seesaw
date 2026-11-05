@@ -9,7 +9,7 @@ step whose arguments wouldn't survive the trip (a Python object, a name the
 registry doesn't take) fails here rather than on the GPU app.
 
 Tiny random models, so it checks plumbing, not science; the known answers
-are in tests/test_pathways_gpt2.py.
+are in tests/test_pathways_models.py.
 """
 
 from __future__ import annotations

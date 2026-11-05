@@ -9,7 +9,7 @@ run_in_sandbox exactly as run_experiment does, on a tiny random model, so a
 wrapper whose signature, kwargs contract or result shape is wrong fails here
 rather than mid-pipeline. The SAE tools and circuit_tracing are left out
 (they need a published SAE, or Neuronpedia's graph service);
-tests/test_pathways_gpt2.py exercises them.
+tests/test_pathways_models.py exercises them.
 """
 
 from __future__ import annotations

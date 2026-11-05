@@ -15,7 +15,7 @@ it looks like.
 | [Audit a spurious dependence](#audit-a-spurious-dependence) | Does the answer depend on something it shouldn't? Can that be erased without breaking the task? | `spurious_audit` |
 | [Locate a fact](#locate-a-fact) | Where does the model retrieve a fact? | `factual_recall` |
 | [Edit a fact](#edit-a-fact) | Is the layer where a fact is traced the best layer to edit it? | `editing_comparison` |
-| [Explain an output](#explain-an-output) | Why did it say X here? Which features drive it? | `feature_explain` (gpt2 only) |
+| [Explain an output](#explain-an-output) | Why did it say X here? Which features drive it? | `feature_explain` (Gemma-2-2B or Qwen2.5-7B-Instruct) |
 | [Diff two models](#diff-two-models) | What did a fine-tune change, and in which weights? | `model_diffing` |
 | [Compare models](#reproducing-a-result) | Does model B do X the same way as model A? | any of the above, rerun on the other model |
 | [Not runnable yet](#not-runnable-yet) | Debug a failure, replicate a claim, attribute to the context | none yet |
@@ -28,9 +28,10 @@ until you can. `probe_monitor` and `model_diffing` take texts, not answer tokens
 Every step of every pathway is labelled with how strong its evidence is (Correlational, Estimate
 or Causal) and whether its controls ran; see [`shared/evidence.py`](../shared/evidence.py).
 
-★ marks a question whose answer is already known on GPT-2 small, checked in
-[`tests/test_pathways_gpt2.py`](../tests/test_pathways_gpt2.py) or established in the literature.
-Start with these: when the verdict comes back you know what it should have said.
+★ marks a question whose answer is already known from the literature, and checked on Gemma-2-2B,
+Llama-3.2-1B and Qwen2.5-1.5B in [`tests/test_pathways_models.py`](../tests/test_pathways_models.py).
+The expected verdicts below are what those tests accept. Start with these: when the verdict comes
+back you know what it should have said.
 
 ## Running one
 
@@ -59,7 +60,7 @@ Then:
 From the dashboard, type `/` in the composer and pick the pathway. From a terminal:
 
 ```bash
-seesaw jobs submit "How does GPT-2 complete 'The war lasted from 1732 to 17' with a later year?" --pathway circuit_discovery --follow
+seesaw jobs submit "How does the model complete 'The war lasted from 1732 to 17' with a later year?" --pathway circuit_discovery --follow
 ```
 
 The inputs each pathway takes are listed in [`seesaw/pathways/catalog.py`](../seesaw/pathways/catalog.py).
@@ -106,14 +107,17 @@ checks that the circuit on its own reproduces the behaviour.
 prompt with the key information changed, same token length) and `reference_prompts` (a neutral
 distribution used as ablation means).
 
-- ★ How does GPT-2 work out who received the object in "When Mary and John went to the store, John
-  gave a drink to"? *(indirect object identification. Expected: name-mover, S-inhibition and
-  negative name-mover heads.)*
-- How does GPT-2 complete "The war lasted from 1732 to 17" with a year later than the start?
+- ★ How does the model work out who received the object in "When Mary and John went to the store,
+  John gave a drink to"? *(indirect object identification, Wang et al. 2022. Expected:
+  `circuit_found` or `partial_circuit`, with confirmed heads. Whether a few heads are the whole
+  circuit depends on the model: on Qwen2.5-1.5B they keep under 10% of it, so it's
+  `partial_circuit` there.)*
+- How does the model complete "The war lasted from 1732 to 17" with a year later than the start?
   *(greater-than, Hanna et al. 2023.)*
-- How does GPT-2 continue a sequence of random tokens it has already seen once? *(induction heads.)*
-- How does GPT-2 choose "are" rather than "is" after a plural subject?
-- How does GPT-2 close a bracket with the right type, `)` or `]`?
+- How does the model continue a sequence of random tokens it has already seen once? *(induction
+  heads.)*
+- How does the model choose "are" rather than "is" after a plural subject?
+- How does the model close a bracket with the right type, `)` or `]`?
 
 ## Find and steer a concept
 
@@ -128,17 +132,17 @@ the direction on the same pairs, which let it pass by construction.
 `positive_tokens`, `negative_tokens`, at least 6 pairs. Optionally `control_prompts` (concept-free
 prompts showing the baseline) and `control_texts` (ordinary text for checking the edit is harmless).
 
-- ★ Does GPT-2 use the gender a job title implies to choose "she" or "he"? Does removing that
+- ★ Does the model use the gender a job title implies to choose "she" or "he"? Does removing that
   direction remove the bias? *(e.g. "The nurse said that" vs "The engineer said that", `" she"` vs
-  `" he"`. Expected: `partly_uses_direction`. On held-out pairs, removal closes about a fifth of the
-  gap, well beyond random directions, and steering moves it all the way.)*
-- ★ Control: does GPT-2 use an irrelevant attribute, like the food someone ate ("The man who ate the
-  apple said that" vs "... the pizza said that"), to choose the pronoun? *(expected: not flagged. Run this next to the one above: an audit that flags everything
+  `" he"`; Vig et al. 2020. Expected: `uses_direction` or `partly_uses_direction`. On held-out
+  pairs, removal closes at least 10 points more of the gap than random directions do.)*
+- ★ Control: does the model use an irrelevant attribute, like the food someone ate ("The man who ate the
+  apple said that" vs "... the pizza said that"), to choose the pronoun? *(expected: `no_effect`. Run this next to the one above: an audit that flags everything
   is worthless.)*
-- Does GPT-2 use the nationality a name implies when it guesses where someone lives ("Hiroshi lives
-  in")?
-- Does GPT-2 change a review's sentiment when only the reviewer's name changes?
-- Does GPT-2 take "not" into account when it chooses a sentiment word, or ignore the negation?
+- Does the model use the nationality a name implies when it guesses where someone lives ("Hiroshi
+  lives in")?
+- Does the model change a review's sentiment when only the reviewer's name changes?
+- Does the model take "not" into account when it chooses a sentiment word, or ignore the negation?
 
 ## Build a detector
 
@@ -150,8 +154,9 @@ on the activations worth it over the cheapest classifier?
 **Inputs:** `prompts` and `contrast_prompts` (training texts with and without the property),
 `test_prompts` and `test_contrast_prompts` (held-out texts, ideally from another source or topic).
 
-- ★ Can a GPT-2 probe trained on movie reviews detect the sentiment of product reviews? *(expected:
-  `lexical_only`. It transfers, but the sentiment words alone do as well.)*
+- ★ Can a probe trained on movie reviews detect the sentiment of product reviews? *(expected:
+  `lexical_only` or `monitor_works`, with at least 85% test accuracy. `lexical_only` means it
+  transfers, but the sentiment words alone do as well.)*
 - Can a probe tell a question the model will answer wrongly from one it will answer correctly?
 - Can a probe flag prompts that try to override earlier instructions?
 
@@ -165,10 +170,13 @@ the task stays, against random erasers.
 **Inputs:** `prompts`, `counterfactual_prompts` (only the attribute swapped), `positive_tokens`,
 `negative_tokens` (the task's right and wrong answers), at least 6 pairs. Optionally `control_texts`.
 
-- ★ Does GPT-2's sentiment judgement depend on the reviewer's name? *(expected: `no_reliance`.)*
-- ★ Does a gendered name pull GPT-2 off an occupation the context states ("My friend Mary has
+- ★ Does the model's sentiment judgement depend on the reviewer's name? *(expected: the name moves
+  the answer by less than a fifth of what the review itself does. On Qwen2.5-1.5B that's 0.36
+  logits against a 3.3-logit task.)*
+- ★ Does a gendered name pull the model off an occupation the context states ("My friend Mary has
   always worked as a pilot. Everyone knows that Mary is a", `" pilot"` vs `" secretary"`)?
-  *(expected: reliance found, and erasure removes it far beyond random erasers.)*
+  *(expected: where there is reliance, erasure removes at least 50 points more of it than random
+  erasers do.)*
 
 ## Locate a fact
 
@@ -178,10 +186,10 @@ position, and reports where the answer's probability comes back.
 
 **Inputs:** `prompts`, `subjects` (the subject as written in each prompt), `positive_tokens`.
 
-- ★ Where does GPT-2 recall that the Eiffel Tower is in Paris? *(expected: the residual stream
-  carries the fact at the subject's last token early and at the final token late. On GPT-2 small
-  the MLP effect at the subject is weak outside layers 0 and 1, so the verdict is `late_site`, not the
-  ROME pattern Meng et al. found in GPT-2 XL.)*
+- ★ Where does the model recall that the Eiffel Tower is in Paris? *(expected: the residual stream
+  carries the fact at the subject's last token in the early layers and at the final token in the
+  late ones, the hand-off Meng et al. 2022 found. The verdict depends on how strong the subject's
+  MLP effect is: `subject_mlp_recall`, `late_site` or `not_localized`.)*
 
 ## Edit a fact
 
@@ -193,7 +201,7 @@ one to edit (Hase et al. 2023 found it usually isn't).
 `paraphrase_prompts`, `neighborhood_prompts` and `neighborhood_tokens` (a different subject with the
 same relation, and its answer).
 
-- ★ Can GPT-2 be taught that Michael Jordan played soccer, and where is the best layer to do it?
+- ★ Can the model be taught that Michael Jordan played soccer, and where is the best layer to do it?
   *(expected: edits work mid-model and can't work at the last layer.)*
 
 ## Diff two models
@@ -205,22 +213,26 @@ for, by swapping them in one at a time.
 
 **Inputs:** `prompts`, and `other_model` (a single TransformerLens model name, not a list).
 
-- ★ Planted: a copy of GPT-2 with noise added to block 5's MLP. *(expected: `localized` at block 5.)*
-- What did instruction tuning change in a Pythia checkpoint, and is it in a few blocks or everywhere?
+- ★ What did instruction tuning change? Compare a base model with its instruct release (e.g.
+  `google/gemma-2-2b` with `--other-model google/gemma-2-2b-it`). *(expected: anything but
+  `no_change`.)*
+- Is what instruction tuning changed in a few blocks or everywhere?
 
 ## Explain an output
 
 **Pathway:** `feature_explain`. It finds the sparse autoencoder (SAE) features that drive the answer
-and describes what each one responds to. It sweeps GPT-2 small SAEs (`gpt2-small-res-jb`, residual
-stream at layers 4, 6, 8 and 10) and explains the layer where switching features off accounts for
-the most, so it only runs on `gpt2`.
+and describes what each one responds to. It sweeps published residual-stream SAEs at several depths
+and explains the layer where switching features off accounts for the most. Only two supported models
+have published SAEs: `google/gemma-2-2b` (Gemma Scope, every layer) and `Qwen/Qwen2.5-7B-Instruct`
+(every 4th layer). On any other model the pathway refuses to run.
 
 **Inputs:** `prompts`, `positive_tokens`, `negative_tokens`.
 
-- ★ Which SAE features make GPT-2 answer "Mary" rather than "John" in the IOI prompt?
-- Why does GPT-2 say "Paris" after "The Eiffel Tower is in"?
-- Which features fire when GPT-2 chooses "he" after "The doctor said that"?
-- What drives GPT-2 to close a quotation mark at the end of a quoted sentence?
+- ★ Which SAE features make the model answer "Mary" rather than "John" in the IOI prompt?
+  *(expected: `features_explain` or `partial`.)*
+- Why does the model say "Paris" after "The Eiffel Tower is in"?
+- Which features fire when the model chooses "he" after "The doctor said that"?
+- What drives the model to close a quotation mark at the end of a quoted sentence?
 
 ## Not runnable yet
 
@@ -230,7 +242,7 @@ fixed verdict.
 
 | Purpose | Sample question | What a pathway would need |
 |---|---|---|
-| Debug a failure | Why does GPT-2 get IOI wrong when the two names are the same gender and length? | Run correct and failing prompts through the same circuit and compare |
+| Debug a failure | Why does the model get IOI wrong when the two names are the same gender and length? | Run correct and failing prompts through the same circuit and compare |
 | Replicate a claim | Does the IOI circuit from Wang et al. (2022) show up in Pythia-160m? | `circuit_discovery` with inputs taken from the paper, checked against its heads |
 | Trace a multi-hop fact | How does the model get from "Dallas" to "Austin"? (Ameisen et al. 2025 found a route through "Texas" in Gemma-2-2B) | Attribution graphs, which Lens's `circuit_tracing` tool reads from Neuronpedia but no pathway uses yet |
 | Attribute to the context | Which retrieved passage made the model give this answer? | Input and context attribution (gradient × input, ablating one passage at a time) |

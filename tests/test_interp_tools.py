@@ -341,7 +341,7 @@ def test_neuronpedia_client_parses_and_caches(monkeypatch, tmp_path):
     assert len(calls) == 1      # second call served from the cache
 
 
-# ── pathways (mechanics only; known answers are in test_pathways_gpt2.py) ─────
+# ── pathways (mechanics only; known answers are in test_pathways_models.py) ─────
 def test_pathway_result_reports_early_stops():
     r = PathwayResult(pathway="x").stop("no_effect", "nothing moved")
     assert r.verdict == "no_effect" and r.stopped_early == "nothing moved"

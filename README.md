@@ -5,7 +5,7 @@
 **A multi-agent framework for automated mechanistic interpretability research**
 
 [![License: Apache 2.0](https://img.shields.io/badge/license-Apache%202.0-blue.svg)](LICENSE)
-[![Python 3.10+](https://img.shields.io/badge/python-3.10%2B-blue.svg)](pyproject.toml)
+[![Python 3.11–3.12](https://img.shields.io/badge/python-3.11%E2%80%933.12-blue.svg)](pyproject.toml)
 [![Built with LangGraph](https://img.shields.io/badge/built%20with-LangGraph-1c1c1c.svg)](https://github.com/langchain-ai/langgraph)
 [![MCP](https://img.shields.io/badge/protocol-MCP-purple.svg)](https://modelcontextprotocol.io)
 
@@ -43,17 +43,17 @@ Every result is labelled with how strong its evidence is (correlational, estimat
 uv venv .venv --python 3.12 && source .venv/bin/activate
 uv pip install -e ".[experiments]"   # Lens needs torch + TransformerLens
 
-cp .env.example .env                 # set ANTHROPIC_API_KEY
+cp .env.example .env                 # set ANTHROPIC_API_KEY (and HF_TOKEN for Gemma or Llama)
 ```
 
 Then ask a question whose answer is already known, so you can check the verdict:
 
 ```bash
 seesaw jobs submit "Does the model use the gender a job title implies to choose 'she' or 'he'?" \
-  --pathway concept_direction --follow
+  --pathway concept_direction --model Qwen/Qwen2.5-1.5B --follow
 ```
 
-`--follow` streams the job's log and asks you to approve at each gate: once for Scout's plan and inputs, once before Quill critiques the results. The job runs on your machine and is stored in a local SQLite file. Artifacts land in `outputs/jobs/<id>/`.
+`--follow` streams the job's log and asks you to approve at each gate: once for Scout's plan and inputs, once before Quill critiques the results. The job runs on your machine and is stored in a local SQLite file. Qwen2.5 is open, so this needs no Hugging Face token; the default model, `google/gemma-2-2b`, is gated, as are the Llama models. Artifacts land in `outputs/jobs/<id>/`.
 
 Leave out `--pathway` and Scout chooses one (or none, and plans the experiments itself). Add `--search` to let Scout search arXiv and the web while it plans; this needs `FIRECRAWL_API_KEY` for web search.
 
@@ -88,9 +88,9 @@ The dashboard ([seesaw-web](https://github.com/vijpandaturtle/seesaw-web)) reads
 | Locate a fact | `factual_recall` | Causal tracing over layers and positions |
 | Edit a fact | `editing_comparison` | ROME edits at every layer, compared with the traced layer |
 | Diff two models | `model_diffing` | Per-prompt KL, which tokens the change favours, and which component's weights account for it |
-| Explain an output | `feature_explain` | Sweeps GPT-2 small SAEs for the features that drive the answer (gpt2 only) |
+| Explain an output | `feature_explain` | Sweeps published SAEs for the features that drive the answer (Gemma-2-2B or Qwen2.5-7B-Instruct) |
 
-The pathways are deterministic, and their random baselines are seeded. A rerun of a job gives the same verdict on the same model and inputs. Their inputs are defined in [`seesaw/pathways/catalog.py`](seesaw/pathways/catalog.py), and the known-answer checks are in [`tests/test_pathways_gpt2.py`](tests/test_pathways_gpt2.py).
+The pathways are deterministic, and their random baselines are seeded. A rerun of a job gives the same verdict on the same model and inputs. Their inputs are defined in [`seesaw/pathways/catalog.py`](seesaw/pathways/catalog.py), and the known-answer checks, run on Gemma-2-2B, Llama-3.2-1B and Qwen2.5-1.5B, are in [`tests/test_pathways_models.py`](tests/test_pathways_models.py).
 
 <br>
 

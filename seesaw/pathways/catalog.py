@@ -103,6 +103,14 @@ PATHWAYS: dict[str, Pathway] = {
 _ALIGNED = ("positive_tokens", "negative_tokens", "counterfactual_prompts", "subjects",
             "target_tokens", "paraphrase_prompts", "neighborhood_prompts", "neighborhood_tokens")
 
+# Inputs that are two groups the pathway compares (a direction, an erasure or a
+# probe is fitted to tell them apart). A sentence in both groups carries both
+# labels: mirrored pairs (the second half of prompts repeating the first half of
+# counterfactual_prompts, answers flipped) make the groups identical, so a probe
+# can only anti-predict and the job ends inconclusive however the model works.
+_GROUPS = (("prompts", "counterfactual_prompts"), ("prompts", "contrast_prompts"),
+           ("test_prompts", "test_contrast_prompts"))
+
 # Inputs that are answer tokens, scored as one vocab id each.
 _TOKENS = ("positive_tokens", "negative_tokens", "target_tokens", "neighborhood_tokens")
 
@@ -117,7 +125,9 @@ INPUTS: dict[str, str] = {
     "reference_prompts": "prompts from a neutral distribution (e.g. IOI's ABC prompts) used as "
                          "ablation means, one per prompt; defaults to the prompts",
     "counterfactual_prompts": "the same prompt with the attribute swapped (e.g. 'nurse' -> "
-                              "'engineer'), one per prompt",
+                              "'engineer'), one per prompt. Keep the direction fixed: every "
+                              "prompt has one value of the attribute, every counterfactual the "
+                              "other; never mirror a pair, so no sentence is in both lists",
     "control_prompts": "attribute-free prompts ('The person said that') showing the model's "
                        "baseline preference; any number",
     "control_texts": "ordinary text for checking an edit doesn't damage the model; any number",
@@ -239,6 +249,15 @@ def validate(name: str, params: dict, model: str = DEFAULT_MODEL) -> list[str]:
             if _is_str_list(value) and value and len(value) != len(prompts):
                 errors.append(f"{key} has {len(value)} entries but prompts has {len(prompts)}")
 
+    for a, b in _GROUPS:
+        if a in params and b in params and _is_str_list(params[a]) and _is_str_list(params[b]):
+            shared = [t for t in dict.fromkeys(params[a]) if t in set(params[b])]
+            if shared:
+                errors.append(
+                    f"{len(shared)} text(s) are in both {a} and {b} (e.g. {shared[0]!r}); the two "
+                    f"groups must not overlap. Don't mirror pairs: every entry of {a} should have the "
+                    f"attribute and every entry of {b} the other one, with the answer tokens to match")
+
     if name == "feature_explain" and not has_saes(model):
         errors.append(_no_saes(model))
     return errors
@@ -272,6 +291,8 @@ def _input_rules(models: list[str]) -> list[str]:
         f"  single token in {model}; prefer short, common words.",
         "- Each prompt should end right before the answer, so the answer is the next token.",
         "- Use at least 8 prompts where the task allows it; vary names and wording.",
+        "- Paired groups (prompts / counterfactual_prompts, prompts / contrast_prompts) are two",
+        "  separate groups: no text may appear in both, so don't add each pair again the other way round.",
     ]
 
 

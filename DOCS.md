@@ -24,11 +24,11 @@ uv pip install -e ".[experiments]"
 
 # 3. Add your API key
 cp .env.example .env
-# edit .env: set ANTHROPIC_API_KEY (required)
+# edit .env: set ANTHROPIC_API_KEY (required), and HF_TOKEN to run the gated Gemma or Llama models
 
-# 4. Run a job on a question with a known answer
-seesaw jobs submit "Does GPT-2 use the gender a job title implies to choose 'she' or 'he'?" \
-  --pathway concept_direction --follow
+# 4. Run a job on a question with a known answer (Qwen2.5 is open: no HF token needed)
+seesaw jobs submit "Does the model use the gender a job title implies to choose 'she' or 'he'?" \
+  --pathway concept_direction --model Qwen/Qwen2.5-1.5B --follow
 ```
 
 With `--follow`, the job's log streams in your terminal and you're asked to approve at each gate: first Scout's plan, pathway and inputs, then the Lens results before Quill critiques them. The job runs in a detached local worker, so Ctrl-C stops watching but not the job. Artifacts go to `outputs/jobs/<id>/`.
@@ -82,7 +82,7 @@ Deployment adds several more; see [Deployment → Environment reference](#enviro
 ### Jobs
 
 ```bash
-seesaw jobs submit "<question>" [--pathway auto|none|<name>] [--model gpt2] [--search] [--auto-approve] [--follow]
+seesaw jobs submit "<question>" [--pathway auto|none|<name>] [--model M ...] [--other-model M] [--search] [--auto-approve] [--follow]
 ```
 
 A job runs Scout, stops at a gate for your approval, runs Lens, stops at a second gate, then runs Quill. The job store records the job, so a job submitted here shows in the dashboard, and one queued from the dashboard can be approved here.
@@ -106,7 +106,8 @@ A job runs Scout, stops at a gate for your approval, runs Lens, stops at a secon
 | `--pathway auto` (default) | Scout reads every pathway's summary and picks the one that answers the question, with a one-sentence reason. If none fits, it picks none and plans the experiments itself. |
 | `--pathway <name>` | That pathway runs, and Scout only chooses its inputs. Use this when you know which one you want, and always for evaluation. |
 | `--pathway none` | No pathway; Scout plans freely |
-| `--model` | The model Lens targets. The default is `gpt2`. |
+| `--model` | A model Lens runs on. Repeat it to run the pathway on several models, in order. The default is `google/gemma-2-2b`. The supported models are listed in [`shared/lens_tools.py`](shared/lens_tools.py). |
+| `--other-model` | `model_diffing` only: the changed model to compare the first one with |
 | `--search` | Let Scout search arXiv and the web while planning. It's off by default, and without it Scout cites no papers as sources. |
 | `--auto-approve` | Run all stages without stopping at the gates |
 | `--follow`, `-f` | Stream the log, and ask whether to approve at each gate |
@@ -162,14 +163,14 @@ A pathway is a fixed, hand-coded investigation that ends in a verdict ([`seesaw/
 | `factual_recall` | Where does the model retrieve these facts? Causal tracing over layers and positions. | `prompts`, `subjects`, `positive_tokens` |
 | `editing_comparison` | Is the layer where a fact is traced the best layer to edit it? ROME at every layer vs tracing. | `prompts`, `subjects`, `positive_tokens`, `target_tokens`, `paraphrase_prompts`, `neighborhood_prompts`, `neighborhood_tokens` |
 | `model_diffing` | What did a fine-tune, quantisation or edit change, and in which weights? | `prompts`, `other_model` |
-| `feature_explain` | Which SAE features drive this output, and what are they? Sweeps GPT-2 small SAEs (gpt2 only). | `prompts`, `positive_tokens`, `negative_tokens` |
+| `feature_explain` | Which SAE features drive this output, and what are they? Sweeps published residual SAEs (Gemma-2-2B or Qwen2.5-7B-Instruct only). | `prompts`, `positive_tokens`, `negative_tokens` |
 
 `attribute_audit` is `concept_direction` under its older name. It's kept so earlier jobs can be rerun.
 
 - **Answer tokens are single tokens.** Most pathways score one answer token against one distractor per prompt, so a good question has an answer the model gives as one next token, such as `" Mary"` vs `" John"`. `probe_monitor` and `model_diffing` take texts instead.
 - **Verdicts are deterministic.** Each pathway has a fixed verdict vocabulary, and its random baselines are seeded. The same pathway version on the same model and inputs gives the same verdict. Each pathway carries a `version`, and results are only comparable within one.
 - **Every step is labelled** with its evidence strength (correlational, estimate or causal) and whether its controls ran. See [`shared/evidence.py`](shared/evidence.py).
-- **Known answers are tested.** [`tests/test_pathways_gpt2.py`](tests/test_pathways_gpt2.py) runs each pathway on a case whose answer is known on GPT-2 small.
+- **Known answers are tested.** [`tests/test_pathways_models.py`](tests/test_pathways_models.py) runs each pathway on a case whose answer is known from the literature, on Gemma-2-2B, Llama-3.2-1B and Qwen2.5-1.5B. It checks what holds across model families, not one model's head numbers. It's opt-in (`SEESAW_MODEL_TESTS=1`) and needs a GPU.
 
 Sample questions for each pathway, sorted by what you want to find out, are in **[docs/use-cases.md](docs/use-cases.md)**. The input definitions Scout is given are in [`seesaw/pathways/catalog.py`](seesaw/pathways/catalog.py).
 

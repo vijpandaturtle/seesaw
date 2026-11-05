@@ -609,3 +609,38 @@ def test_a_rerun_replays_each_experiment_on_its_own_model_or_on_every_new_one(jo
     moved = jobs.rerun(job.id, model=[QWEN, "Qwen/Qwen2.5-0.5B"])
     run_stage(jobs, moved.id)
     assert [e["model_name"] for e in lens["replays"][-1]["experiments"]] == [QWEN, "Qwen/Qwen2.5-0.5B"]
+
+
+def test_a_plan_saved_with_an_mtime_behind_the_clock_still_counts(tmp_path):
+    """Linux stamps files from a coarse clock that can read a few ms behind
+    time.time(); a plan saved straight away, or rewritten on a revision, must
+    still be found."""
+    import os
+    import time
+
+    from orchestrator.src.clients import scout_client
+
+    class BehindClock(FakeAgent):
+        def stream(self, payload, config, stream_mode):
+            super().stream(payload, config, stream_mode)
+            past = time.time_ns() - 50_000_000                       # 50 ms before now
+            os.utime(self.output_dir / "ioi_research_plan.md", ns=(past, past))
+            return iter(())
+
+    agent = BehindClock(tmp_path, [plan(IOI), plan(IOI, "concept_direction")])
+    first = scout_client._turn(agent, {}, "plan it", tmp_path, verbose=False)
+    second = scout_client._turn(agent, {}, "fix it", tmp_path, verbose=False)   # rewrites the same file
+    assert first == second == tmp_path / "ioi_research_plan.md"
+    assert "concept_direction" in second.read_text()
+
+
+def test_a_turn_that_saves_nothing_says_so(tmp_path):
+    from orchestrator.src.clients import scout_client
+
+    class Silent:
+        def stream(self, payload, config, stream_mode):
+            return iter(())
+
+    (tmp_path / "old_research_plan.md").write_text(plan(IOI))           # from an earlier turn
+    with pytest.raises(RuntimeError, match="no \\*research_plan\\*.md"):
+        scout_client._turn(Silent(), {}, "plan it", tmp_path, verbose=False)

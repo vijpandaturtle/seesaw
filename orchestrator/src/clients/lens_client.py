@@ -3,7 +3,6 @@
 from pathlib import Path
 
 from lens.mcp_server.src.config.settings import OUTPUTS_DIR
-from lens.mcp_server.src.workflows.lens_workflow import build_lens_graph
 from shared.db import events
 
 
@@ -33,6 +32,11 @@ def run_lens(
     Raises:
         RuntimeError: If the workflow completes without a bundle.
     """
+    # Imported here, not at the top: the workflow pulls in torch and
+    # TransformerLens, and the orchestrator (and its tests, which fake this
+    # function) must import without the experiment stack installed.
+    from lens.mcp_server.src.workflows.lens_workflow import build_lens_graph
+
     graph  = build_lens_graph()
     config = {"configurable": {"thread_id": thread_id}, "callbacks": events.callbacks()}
 

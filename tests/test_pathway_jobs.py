@@ -9,7 +9,7 @@ What has to hold:
     the rows already stored still read, and one still queued fails with a
     message saying what to do instead
 
-The pathway itself is faked here; tests/test_pathways_gpt2.py checks the real
+The pathway itself is faked here; tests/test_pathways_models.py checks the real
 ones against known answers, and tests/test_pathway_research.py covers Scout
 choosing the inputs and reruns.
 """
@@ -18,7 +18,6 @@ from __future__ import annotations
 
 import json
 
-import numpy as np
 import pytest
 
 from seesaw.pathways import catalog
@@ -99,6 +98,7 @@ def test_feature_explain_sweeps_the_layers_its_model_has_saes_for():
 
 # ── worker ───────────────────────────────────────────────────────────────────
 def test_lens_runs_the_pathway_and_writes_its_result(jobs, at_lens, monkeypatch):
+    np = pytest.importorskip("numpy")  # a numpy finding must still serialise
     from orchestrator.src import worker
 
     seen = {}
@@ -176,6 +176,7 @@ def test_hand_entered_inputs_cant_start_a_job(jobs):
 
 
 def test_every_catalogued_pathway_has_a_module_with_run():
+    pytest.importorskip("transformer_lens")  # the pathway modules import it
     import importlib
     import inspect
 
@@ -197,3 +198,26 @@ def test_fact_inputs_line_up_with_the_prompts():
     params = {"prompts": ["The Eiffel Tower is in", "Big Ben is in"], "subjects": ["The Eiffel Tower"],
               "positive_tokens": [" Paris", " London"]}
     assert any("subjects has 1 entries" in e for e in catalog.validate("factual_recall", params))
+
+
+def test_mirrored_pairs_are_refused():
+    """The second half repeating the first, flipped: the groups are the same
+    sentences, so no direction or probe can tell them apart."""
+    women, men = ["The nurse said that", "The maid said that"], ["The pilot said that", "The plumber said that"]
+    mirrored = {"prompts": women + men, "counterfactual_prompts": men + women,
+                "positive_tokens": [" she"] * 2 + [" he"] * 2, "negative_tokens": [" he"] * 2 + [" she"] * 2}
+    for name in ("concept_direction", "attribute_audit", "spurious_audit"):
+        errors = catalog.validate(name, mirrored)
+        assert len(errors) == 1 and "both prompts and counterfactual_prompts" in errors[0], errors
+    one_way = {"prompts": women, "counterfactual_prompts": men,
+               "positive_tokens": [" she"] * 2, "negative_tokens": [" he"] * 2}
+    assert catalog.validate("concept_direction", one_way) == []
+
+
+def test_a_probe_text_in_both_classes_is_refused():
+    texts = {"prompts": ["I loved it", "Great film"], "contrast_prompts": ["I hated it", "Great film"],
+             "test_prompts": ["Works well"], "test_contrast_prompts": ["Broke at once"]}
+    errors = catalog.validate("probe_monitor", texts)
+    assert len(errors) == 1 and "'Great film'" in errors[0], errors
+    texts["contrast_prompts"] = ["I hated it", "Awful film"]
+    assert catalog.validate("probe_monitor", texts) == []
