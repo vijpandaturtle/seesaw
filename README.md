@@ -73,7 +73,7 @@ Leave out `--pathway` and Scout chooses one (or none, and plans the experiments 
 | `seesaw plan "<question>"` · `seesaw critique <bundle.json>` | Scout only, or Quill only |
 | `seesaw eval <task>` · `seesaw fixtures` | The eval suite, and the meta-eval that checks its graders |
 
-The dashboard ([seesaw-web](https://github.com/vijpandaturtle/seesaw-web)) reads the same job store, so a job started in one shows in the other.
+The dashboard ([seesaw-web](https://github.com/vijpandaturtle/seesaw-web)) reads the same job store when it's Postgres (`DATABASE_URL`), so a job started in one shows in the other. Jobs in the local SQLite file don't show there. Set the same `SEESAW_DB_SCHEMA` on both sides to keep trial jobs apart from the live ones.
 
 <br>
 

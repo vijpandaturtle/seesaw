@@ -85,7 +85,7 @@ Deployment adds several more; see [Deployment → Environment reference](#enviro
 seesaw jobs submit "<question>" [--pathway auto|none|<name>] [--model M ...] [--other-model M] [--search] [--auto-approve] [--follow]
 ```
 
-A job runs Scout, stops at a gate for your approval, runs Lens, stops at a second gate, then runs Quill. The job store records the job, so a job submitted here shows in the dashboard, and one queued from the dashboard can be approved here.
+A job runs Scout, stops at a gate for your approval, runs Lens, stops at a second gate, then runs Quill. The job store records the job, so with a Postgres store (`DATABASE_URL`) a job submitted here shows in the dashboard, and one queued from the dashboard can be approved here. The dashboard reads only Postgres: a job in the local SQLite file (no `DATABASE_URL`, or `SEESAW_DB_PATH` set) shows only in the CLI. For trial runs, set `SEESAW_DB_SCHEMA` (on both sides) to use an isolated copy of the tables.
 
 | Command | Does |
 |---|---|
