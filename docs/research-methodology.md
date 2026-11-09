@@ -1,7 +1,6 @@
 # Seesaw research methodology: evidence tiers
 
-**Status:** draft for discussion · **Used by:** the Model Atlas spec in seesaw-web
-(`docs/model-atlas-spec.md`), whose datasheet `tier` field this defines · **Touches:** Scout's plan template, Lens's run order, Quill's
+**Status:** draft for discussion · **Touches:** Scout's plan template, Lens's run order, Quill's
 critique, `shared/lens_tools.py`, the eval suite
 
 ## Why
@@ -162,17 +161,9 @@ If plans and critiques don't measurably improve, that's the cheapest point to fi
 2. **Schema.** Add `hypothesis_id` / `phase` / `verifies` to specs and `claims` to the critique.
    The web job page can then show each hypothesis with its tier reached.
 3. **Phased Lens runs.** Nomination outputs feed verification inputs automatically.
-4. **Survey mode.** A job with a model and no question: run the standard tier-1 (and cheap tier-3)
-   battery and write `datasheet.json`. This is the Model Atlas's producer. A datasheet section's
-   `tier` becomes this evidence tier, which the Atlas already groups by.
 
-## Effect on the Model Atlas spec
-
-- Its "tiered methodology" line refers to this document. Until survey mode exists, datasheets stay
-  hand-made or examples.
-- `tier` in `datasheet.json` gets a defined meaning: evidence tier 1–4, as above.
-- The model reference (a resolved hub id plus revision on every job) becomes a prerequisite for
-  reusing tier results across jobs, since a result is only reusable under the same provenance.
+A result is only reusable across jobs under the same provenance, so reusing tier results needs a
+resolved model reference (hub id plus revision) on every job.
 
 ## Open questions
 
