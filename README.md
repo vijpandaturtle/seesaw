@@ -89,6 +89,7 @@ Seesaw is organized by what you want to do with a model, not by technique. Each 
 | Steer or edit a behavior | Targeted change vs. collateral damage | Prompting, fine-tuning | `concept_direction` | Baseline missing |
 | Edit or unlearn a fact | Efficacy and generalization vs. damage to neighboring facts | Fine-tuning; gradient-ascent unlearning | `editing_comparison` | Baseline missing |
 | Explain a fine-tune | Recall of a planted change, and false alarms | Comparing outputs on eval sets | `model_diffing` | Baseline missing |
+| Find failure modes | Distinct failures found under a query budget, and their severity | Black-box red-teaming and fuzzing | — | Planned |
 | Find a backdoor | Trigger identified, and in how many queries | Black-box red-teaming | — | Planned |
 | Audit a hidden objective | Names the planted goal or behavior | Behavioral testing and prompting | — | Planned |
 | Remove a spurious background (vision) | Worst-group accuracy (Waterbirds) | Group reweighting, retraining the head | lever tools | Planned |

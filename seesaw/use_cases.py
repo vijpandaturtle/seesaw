@@ -113,6 +113,16 @@ USE_CASES: dict[str, UseCase] = {
         example="What did instruction tuning change between Qwen2.5-1.5B and "
                 "Qwen2.5-1.5B-Instruct, and in which layers?",
     ),
+    "find_failure_modes": UseCase(
+        "Find failure modes",
+        "Where does my model break, and can its internals point me there faster?",
+        metric="distinct failures found under a fixed query budget, and how severe they are",
+        baseline="black-box red-teaming and fuzzing under the same budget",
+        status="planned",
+        gap="needs a pathway that searches from the model's internals (push along a direction or "
+            "feature, or attack the activations, then find real inputs that do the same) and a "
+            "scorer for distinct failures; find_a_backdoor is its version with a planted answer",
+    ),
     "find_a_backdoor": UseCase(
         "Find a backdoor",
         "Does this model have a hidden trigger, and what is it?",
