@@ -9,7 +9,7 @@
 [![Built with LangGraph](https://img.shields.io/badge/built%20with-LangGraph-1c1c1c.svg)](https://github.com/langchain-ai/langgraph)
 [![MCP](https://img.shields.io/badge/protocol-MCP-purple.svg)](https://modelcontextprotocol.io)
 
-[Setup & Usage Docs](DOCS.md) · [Use-cases](docs/use-cases.md) · [Pathways](#pathways) · [Architecture](#architecture) · [Blog](https://mindsandai.substack.com)
+[Setup & Usage Docs](DOCS.md) · [Use cases](#use-cases) · [Sample questions](docs/use-cases.md) · [Pathways](#pathways) · [Architecture](#architecture) · [Blog](https://mindsandai.substack.com)
 
 </div>
 
@@ -71,13 +71,35 @@ Leave out `--pathway` and Scout chooses one (or none, and plans the experiments 
 | `seesaw jobs rerun <id> [--model M]` | Run a job's pathway again on its approved inputs, from Lens, optionally on another model |
 | `seesaw run "<question>"` | The whole pipeline in your terminal, with no job record and no pathway |
 | `seesaw plan "<question>"` · `seesaw critique <bundle.json>` | Scout only, or Quill only |
+| `seesaw use-cases [--json PATH]` | What Seesaw is for: each use case's metric, baseline, pathway and status |
 | `seesaw eval <task>` · `seesaw fixtures` | The eval suite, and the meta-eval that checks its graders |
 
 The dashboard ([seesaw-web](https://github.com/vijpandaturtle/seesaw-web)) reads the same job store when it's Postgres (`DATABASE_URL`), so a job started in one shows in the other. Jobs in the local SQLite file don't show there. Set the same `SEESAW_DB_SCHEMA` on both sides to keep trial jobs apart from the live ones.
 
 <br>
 
+## Use cases
+
+Seesaw is organized by what you want to do with a model, not by technique. Each use case is scored by an outcome metric and compared with the best way to do the job without interpretability. The catalog is [`seesaw/use_cases.py`](seesaw/use_cases.py); `seesaw use-cases` lists it, and `seesaw jobs submit --use-case <name>` runs one.
+
+| Use case | Outcome metric | Baseline without interp | Pathway | Status |
+|---|---|---|---|---|
+| Detect a property | Held-out accuracy of an activation probe | Bag-of-words and embeddings-only probes | `probe_monitor` | Runnable |
+| Remove a spurious correlation | Accuracy on a balanced or shifted test set | Fine-tuning or reweighting on rebalanced data | `spurious_audit` | Baseline missing |
+| Steer or edit a behavior | Targeted change vs. collateral damage | Prompting, fine-tuning | `concept_direction` | Baseline missing |
+| Edit or unlearn a fact | Efficacy and generalization vs. damage to neighboring facts | Fine-tuning; gradient-ascent unlearning | `editing_comparison` | Baseline missing |
+| Explain a fine-tune | Recall of a planted change, and false alarms | Comparing outputs on eval sets | `model_diffing` | Baseline missing |
+| Find a backdoor | Trigger identified, and in how many queries | Black-box red-teaming | — | Planned |
+| Audit a hidden objective | Names the planted goal or behavior | Behavioral testing and prompting | — | Planned |
+| Remove a spurious background (vision) | Worst-group accuracy (Waterbirds) | Group reweighting, retraining the head | lever tools | Planned |
+| Resist a typographic attack (vision) | Accuracy on attacked vs. clean images | Prompting, light fine-tune | lever tools | Planned |
+| Reduce object hallucination (vision) | Accuracy on yes/no object questions | Prompting, contrastive decoding | lever tools | Planned |
+
+"Baseline missing" means the pathway does the job but doesn't yet run the baseline arm or score the outcome metric, so its verdict doesn't answer the use case on its own. Three more entries cover understanding a model, with no outcome to beat: understand a capability (`circuit_discovery`), locate a fact (`factual_recall`) and explain an output (`feature_explain`).
+
 ## Pathways
+
+Pathways are the methods use cases run.
 
 | Purpose | Pathway | What it does |
 |---|---|---|

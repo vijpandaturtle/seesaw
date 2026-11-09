@@ -102,6 +102,25 @@ def _cmd_fixtures(args) -> int:
     return 0 if not res["mismatches"] else 1
 
 
+def _cmd_use_cases(args) -> int:
+    from . import use_cases
+
+    if args.json:
+        print(f"wrote {use_cases.write_json(args.json)}")
+        return 0
+    for track, heading in (("use", "Use cases"), ("understand", "Understanding a model")):
+        print(heading)
+        for name, case in use_cases.USE_CASES.items():
+            if case.track != track:
+                continue
+            how = ", ".join(case.pathways or case.tools) or "-"
+            print(f"  {case.status:8s} {case.modality:6s} {name:28s} {how}")
+            if track == "use":
+                print(f"  {'':16s} metric:   {case.metric}\n  {'':16s} baseline: {case.baseline}")
+        print()
+    return 0
+
+
 def _write_json(path: str, payload: dict) -> None:
     """Dump a result for the dashboard to read.
 
@@ -139,6 +158,10 @@ def main() -> int:
     p.add_argument("--list", action="store_true")
     p.add_argument("--json", metavar="PATH", help="write the task catalog for the dashboard")
     p.set_defaults(fn=_cmd_eval)
+
+    p = sub.add_parser("use-cases", help="what seesaw is for: each use case, its metric, baseline and status")
+    p.add_argument("--json", metavar="PATH", help="write the use-case catalog for the dashboard")
+    p.set_defaults(fn=_cmd_use_cases)
 
     p = sub.add_parser("fixtures", help="grader meta-eval")
     p.add_argument("--llm", nargs="?", const="", metavar="AGENT",
