@@ -386,22 +386,38 @@ def create(question: str, model: str | list[str] = DEFAULT_MODEL, auto_approve: 
             Scout choose the pathway too, or none. {"search": True} gives
             Scout its literature search tools; it plans without them otherwise.
             {"other_model": name} is what model_diffing compares the first
-            model with, when the user chose it.
+            model with, when the user chose it. {"use_case": name} records
+            which of seesaw.use_cases the job is for; with no pathway given,
+            the use case's main pathway runs.
 
     Returns:
         The created Job.
 
     Raises:
-        ValueError: unknown params, an unknown pathway, or models the pathway
-            can't run on.
+        ValueError: unknown params, an unknown pathway or use case, a planned
+            use case, a pathway the use case doesn't use, or models the
+            pathway can't run on.
     """
+    from seesaw import use_cases
     from seesaw.pathways import catalog
 
     models = catalog.as_models(model)
     params = dict(params or {})
-    if not set(params) <= {"pathway", "search", "other_model"}:
+    if not set(params) <= {"pathway", "search", "other_model", "use_case"}:
         raise ValueError("a research job's params are only {\"pathway\": name or \"auto\", "
-                         "\"search\": bool, \"other_model\": name}; Scout chooses the pathway's inputs")
+                         "\"search\": bool, \"other_model\": name, \"use_case\": name}; "
+                         "Scout chooses the pathway's inputs")
+    if params.get("use_case") is not None:
+        case = use_cases.USE_CASES.get(params["use_case"])
+        if case is None:
+            raise ValueError(f"unknown use case {params['use_case']!r}; expected one of "
+                             f"{use_cases.names()}")
+        if case.status == "planned":
+            raise ValueError(f"use case {params['use_case']!r} is planned, not runnable yet: {case.gap}")
+        params.setdefault("pathway", case.pathways[0])
+        if params["pathway"] not in case.pathways:
+            raise ValueError(f"use case {params['use_case']!r} runs {' or '.join(case.pathways)}, "
+                             f"not {params['pathway']!r}")
     name = params.get("pathway")
     if name is not None and name != catalog.AUTO and name not in catalog.names():
         raise ValueError(f"unknown pathway {name!r}; expected one of "
@@ -461,8 +477,9 @@ def rerun(job_id: str, model: str | list[str] | None = None, auto_approve: bool 
     if problems:
         raise ValueError(f"job {job_id}'s inputs can't run on {catalog._on(models)}: " + "; ".join(problems))
     copied = {"pathway": name, "pathway_params": inputs, "rerun_of": source.id, "models": models}
-    if params.get("other_model"):
-        copied["other_model"] = params["other_model"]
+    for key in ("other_model", "use_case"):
+        if params.get(key):
+            copied[key] = params[key]
     return _insert(source.question, models[0], "lens", auto_approve, copied,
                    plan_path=source.plan_path)
 

@@ -1,6 +1,6 @@
 """`seesaw jobs …` — submit and drive jobs in the shared job store from a terminal.
 
-    seesaw jobs submit "<question>" [--pathway P|auto|none] [--search] [--model M ...] [--other-model M] [--auto-approve] [--follow]
+    seesaw jobs submit "<question>" [--use-case U] [--pathway P|auto|none] [--search] [--model M ...] [--other-model M] [--auto-approve] [--follow]
     seesaw jobs rerun <id> [--model M ...] [--auto-approve] [--follow]
     seesaw jobs list [--limit N] [--json]
     seesaw jobs show <id> [--json]
@@ -14,7 +14,8 @@ Unlike `seesaw run`, which runs the pipeline in this process and records
 nothing, these go through the same job store the dashboard reads: a job
 submitted here shows up there, and one queued there can be approved here.
 
-`--pathway` makes one of seesaw.pathways part of the job; Scout chooses its
+`--use-case` records which of seesaw.use_cases the job is for and runs its
+main pathway (`seesaw use-cases` lists them). `--pathway` makes one of seesaw.pathways part of the job; Scout chooses its
 inputs. It defaults to `auto`, where Scout chooses the pathway too (or none);
 `--pathway none` skips pathways. `--search` lets Scout search the literature
 while planning. `rerun` runs that pathway again on the same approved inputs,
@@ -136,6 +137,8 @@ def _describe(job) -> str:
         lines.append("pathway  none (Scout chose not to run one)")
     if params.get("pathway_why"):
         lines.append(f"why      {params['pathway_why']}")
+    if params.get("use_case"):
+        lines.append(f"use case {params['use_case']}")
     for label, path in (("plan", job.plan_path), ("bundle", job.bundle_path), ("report", job.report_path)):
         if path:
             lines.append(f"{label:8s} {path}")
@@ -273,9 +276,15 @@ def cmd_submit(args) -> int:
 
 
 def _submit_params(args) -> dict | None:
-    """--pathway (a name, auto, or none), --search and --other-model, as a job's params."""
+    """--use-case, --pathway (a name, auto, or none), --search and --other-model, as a job's params.
+
+    With --use-case and the default --pathway auto, the use case's main pathway runs.
+    """
     params = {}
-    if args.pathway and args.pathway != "none":
+    use_case = getattr(args, "use_case", None)
+    if use_case:
+        params["use_case"] = use_case
+    if args.pathway and args.pathway != "none" and not (use_case and args.pathway == "auto"):
         params["pathway"] = args.pathway
     if args.search:
         params["search"] = True
@@ -385,6 +394,9 @@ def add_parser(sub) -> None:
                         "(circuit_discovery, concept_direction, probe_monitor, spurious_audit, "
                         "factual_recall, editing_comparison, model_diffing, feature_explain): run "
                         "that one, Scout chooses its inputs; none: no pathway, Scout plans freely")
+    p.add_argument("--use-case",
+                   help="what the job is for (seesaw use-cases lists them); runs that use case's "
+                        "main pathway unless --pathway names another it uses")
     p.add_argument("--search", action="store_true",
                    help="let Scout search arXiv and the web while planning (off by default)")
     p.add_argument("--model", action="append",
