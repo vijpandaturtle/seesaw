@@ -31,13 +31,13 @@ def test_every_offered_pathway_belongs_to_a_use_case():
 def test_a_pathway_maps_to_the_use_case_that_lists_it_first():
     # factual_recall is a supporting pathway of edit_or_unlearn_fact, but locate_a_fact leads with it.
     assert use_cases.for_pathway("factual_recall") == "locate_a_fact"
-    assert use_cases.for_pathway("editing_comparison") == "edit_or_unlearn_fact"
+    assert use_cases.for_pathway("editing_comparison") == "unlearn_knowledge"
 
 
 def test_problems_catches_a_bad_entry(monkeypatch):
     bad = dict(use_cases.USE_CASES)
-    bad["broken"] = use_cases.UseCase("Broken", "?", "m", "b", status="runnable", pathways=("nope",))
-    bad["vague"] = use_cases.UseCase("Vague", "?", "m", "b", status="partial", pathways=("probe_monitor",))
+    bad["broken"] = use_cases.UseCase("Broken", "?", "m", "b", status="runnable", area="fix", pathways=("nope",))
+    bad["vague"] = use_cases.UseCase("Vague", "?", "m", "b", status="partial", area="monitor", pathways=("probe_monitor",))
     monkeypatch.setattr(use_cases, "USE_CASES", bad)
     found = use_cases.problems()
     assert "broken: unknown pathway nope" in found
@@ -81,14 +81,14 @@ def test_a_use_case_runs_its_main_pathway(jobs):
 
 
 def test_a_use_case_can_name_another_of_its_pathways(jobs):
-    job = jobs.create("q", params={"use_case": "edit_or_unlearn_fact", "pathway": "factual_recall"})
+    job = jobs.create("q", params={"use_case": "unlearn_knowledge", "pathway": "factual_recall"})
     assert job.params_dict["pathway"] == "factual_recall"
 
 
 @pytest.mark.parametrize("params, message", [
     ({"use_case": "nope"}, "unknown use case 'nope'"),
     ({"use_case": "find_a_backdoor"}, "is planned, not runnable yet"),
-    ({"use_case": "detect_a_property", "pathway": "circuit_discovery"}, "runs probe_monitor"),
+    ({"use_case": "build_a_safety_monitor", "pathway": "circuit_discovery"}, "runs probe_monitor"),
 ])
 def test_a_use_case_job_is_checked(jobs, params, message):
     with pytest.raises(ValueError, match=message):
@@ -107,10 +107,10 @@ def test_a_rerun_keeps_the_use_case(jobs, monkeypatch, tmp_path):
 
 
 def test_submit_takes_a_use_case(jobs, monkeypatch, capsys):
-    argv = ("jobs", "submit", "q", "--use-case", "detect_a_property", "--runner", "queue")
+    argv = ("jobs", "submit", "q", "--use-case", "build_a_safety_monitor", "--runner", "queue")
     assert seesaw(monkeypatch, *argv) == 0
     [job] = jobs.list_jobs()
-    assert job.params_dict == {"use_case": "detect_a_property", "pathway": "probe_monitor",
+    assert job.params_dict == {"use_case": "build_a_safety_monitor", "pathway": "probe_monitor",
                                "models": [jobs.DEFAULT_MODEL]}
 
 
@@ -121,3 +121,12 @@ def test_use_cases_command_lists_and_writes_json(monkeypatch, capsys, tmp_path):
     path = tmp_path / "out.json"
     assert seesaw(monkeypatch, "use-cases", "--json", str(path)) == 0
     assert json.loads(path.read_text())["use_cases"]
+
+
+def test_every_use_case_has_a_safety_area_and_the_json_lists_them(tmp_path):
+    data = use_cases.as_json()
+    assert [a["name"] for a in data["areas"]] == ["monitor", "audit", "fix", "understand"]
+    assert {c["area"] for c in data["use_cases"]} <= set(use_cases.AREAS)
+    # Every area but understand has something in it that's a job with an outcome to beat.
+    for area in ("monitor", "audit", "fix"):
+        assert any(c.area == area for c in use_cases.USE_CASES.values()), area

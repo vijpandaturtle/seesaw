@@ -108,14 +108,14 @@ def _cmd_use_cases(args) -> int:
     if args.json:
         print(f"wrote {use_cases.write_json(args.json)}")
         return 0
-    for track, heading in (("use", "Use cases"), ("understand", "Understanding a model")):
+    for area, heading in use_cases.AREAS.items():
         print(heading)
         for name, case in use_cases.USE_CASES.items():
-            if case.track != track:
+            if case.area != area:
                 continue
             how = ", ".join(case.pathways or case.tools) or "-"
-            print(f"  {case.status:8s} {case.modality:6s} {name:28s} {how}")
-            if track == "use":
+            print(f"  {case.status:8s} {case.modality:6s} {name:30s} {how}")
+            if area != "understand":
                 print(f"  {'':16s} metric:   {case.metric}\n  {'':16s} baseline: {case.baseline}")
         print()
     return 0

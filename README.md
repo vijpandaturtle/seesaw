@@ -2,7 +2,7 @@
 
 # Seesaw
 
-**A multi-agent framework for automated mechanistic interpretability research**
+**A multi-agent framework for automated interpretability research on AI safety problems**
 
 [![License: Apache 2.0](https://img.shields.io/badge/license-Apache%202.0-blue.svg)](LICENSE)
 [![Python 3.11–3.12](https://img.shields.io/badge/python-3.11%E2%80%933.12-blue.svg)](pyproject.toml)
@@ -23,7 +23,7 @@
 
 ## Overview
 
-Seesaw automates the hypothesis → experiment → critique loop in mechanistic interpretability. You ask a research question; three agents handle the rest.
+Seesaw automates the hypothesis → experiment → critique loop in mechanistic interpretability, aimed at AI safety jobs: monitoring a model for unsafe behavior, auditing it for hidden problems, and fixing what's found. You ask a question; three agents handle the rest.
 
 <div align="center">
 
@@ -80,23 +80,25 @@ The dashboard ([seesaw-web](https://github.com/vijpandaturtle/seesaw-web)) reads
 
 ## Use cases
 
-Seesaw is organized by what you want to do with a model, not by technique. Each use case is scored by an outcome metric and compared with the best way to do the job without interpretability. The catalog is [`seesaw/use_cases.py`](seesaw/use_cases.py); `seesaw use-cases` lists it, and `seesaw jobs submit --use-case <name>` runs one.
+Seesaw is organized around AI safety jobs, not techniques. Each use case is scored by an outcome metric and compared with the best way to do the job without interpretability, so a result says whether looking inside the model actually helped. The catalog is [`seesaw/use_cases.py`](seesaw/use_cases.py); `seesaw use-cases` lists it, and `seesaw jobs submit --use-case <name>` runs one.
 
-| Use case | Outcome metric | Baseline without interp | Pathway | Status |
-|---|---|---|---|---|
-| Detect a property | Held-out accuracy of an activation probe | Bag-of-words and embeddings-only probes | `probe_monitor` | Runnable |
-| Remove a spurious correlation | Accuracy on a balanced or shifted test set | Fine-tuning or reweighting on rebalanced data | `spurious_audit` | Baseline missing |
-| Steer or edit a behavior | Targeted change vs. collateral damage | Prompting, fine-tuning | `concept_direction` | Baseline missing |
-| Edit or unlearn a fact | Efficacy and generalization vs. damage to neighboring facts | Fine-tuning; gradient-ascent unlearning | `editing_comparison` | Baseline missing |
-| Explain a fine-tune | Recall of a planted change, and false alarms | Comparing outputs on eval sets | `model_diffing` | Baseline missing |
-| Find failure modes | Distinct failures found under a query budget, and their severity | Black-box red-teaming and fuzzing | — | Planned |
-| Find a backdoor | Trigger identified, and in how many queries | Black-box red-teaming | — | Planned |
-| Audit a hidden objective | Names the planted goal or behavior | Behavioral testing and prompting | — | Planned |
-| Remove a spurious background (vision) | Worst-group accuracy (Waterbirds) | Group reweighting, retraining the head | lever tools | Planned |
-| Resist a typographic attack (vision) | Accuracy on attacked vs. clean images | Prompting, light fine-tune | lever tools | Planned |
-| Reduce object hallucination (vision) | Accuracy on yes/no object questions | Prompting, contrastive decoding | lever tools | Planned |
+| Goal | Use case | Outcome metric | Baseline without interp | Pathway | Status |
+|---|---|---|---|---|---|
+| Monitor | Build a safety monitor (deception, prompt injection, harmful intent) | Held-out accuracy of an activation probe | Bag-of-words and embeddings-only probes | `probe_monitor` | Runnable |
+| Monitor | Check reasoning faithfulness | Stated reason matches what the answer depends on | Counterfactual prompt edits, output only | — | Planned |
+| Audit | Find failure modes | Distinct failures found under a query budget, and their severity | Black-box red-teaming and fuzzing | — | Planned |
+| Audit | Find a backdoor | Trigger identified, and in how many queries | Black-box red-teaming | — | Planned |
+| Audit | Audit a hidden objective | Names the planted goal or behavior | Behavioral testing and prompting | — | Planned |
+| Audit | Detect sandbagging | Tells sandbagging models from honest ones, with few false alarms | Elicitation by fine-tuning or few-shot prompting | — | Planned |
+| Audit | Audit a fine-tune | Recall of a planted change, and false alarms | Comparing outputs on eval sets | `model_diffing` | Baseline missing |
+| Fix | Steer away from unsafe behavior (sycophancy, bias) | Targeted change vs. collateral damage | Prompting, safety fine-tuning | `concept_direction` | Baseline missing |
+| Fix | Remove a spurious correlation | Accuracy on a balanced or shifted test set | Fine-tuning or reweighting on rebalanced data | `spurious_audit` | Baseline missing |
+| Fix | Edit or unlearn knowledge | Forgetting the target vs. ability kept elsewhere | Gradient-ascent unlearning, fine-tuning | `editing_comparison` | Baseline missing |
+| Fix (vision) | Resist prompt injection in images | Accuracy on attacked vs. clean images | Prompting, light fine-tune | lever tools | Planned |
+| Fix (vision) | Reduce object hallucination | Accuracy on yes/no object questions | Prompting, contrastive decoding | lever tools | Planned |
+| Fix (vision) | Remove a spurious background | Worst-group accuracy (Waterbirds) | Group reweighting, retraining the head | lever tools | Planned |
 
-"Baseline missing" means the pathway does the job but doesn't yet run the baseline arm or score the outcome metric, so its verdict doesn't answer the use case on its own. Three more entries cover understanding a model, with no outcome to beat: understand a capability (`circuit_discovery`), locate a fact (`factual_recall`) and explain an output (`feature_explain`).
+"Baseline missing" means the pathway does the job but doesn't yet run the baseline arm or score the outcome metric, so its verdict doesn't answer the use case on its own. Most of the planned audits need model organisms: small models with a planted backdoor, objective or hidden capability, so an audit can be scored against the plant. Three more entries cover understanding a model, with no outcome to beat: understand a capability (`circuit_discovery`), locate a fact (`factual_recall`) and explain an output (`feature_explain`).
 
 ## Pathways
 
