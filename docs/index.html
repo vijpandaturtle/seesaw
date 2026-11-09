@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="theme-color" content="#dceaff">
 <title>Seesaw - AI Safety</title>
-<meta name="description" content="Seesaw is a multi-agent system that automates the hypothesis → experiment → critique loop in mechanistic interpretability research, with eight hand-coded pathways checked against known answers.">
+<meta name="description" content="Seesaw is a multi-agent system for AI safety work with interpretability: monitoring, auditing and fixing models, with every use case scored against a baseline that doesn't use interpretability.">
 <link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>⚖️</text></svg>">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -110,6 +110,28 @@
   table.tools th { font: 500 12px var(--mono); text-transform: uppercase; letter-spacing: .06em; color: var(--muted); border-top: 0; }
   table.tools td.tool-name { font: 500 13px var(--mono); color: var(--accent); white-space: nowrap; padding-right: 24px; }
 
+  /* Use cases */
+  h3.area { font: 500 14px var(--sans); color: var(--muted); margin: 32px 0 12px; }
+  h3.area span { font: 600 13px var(--mono); text-transform: uppercase; letter-spacing: .05em; color: var(--accent-bright); margin-right: 6px; }
+  .uc-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 14px; }
+  .uc { background: var(--surface); border: 1px solid var(--line); border-radius: 14px; padding: 18px 20px; display: flex; flex-direction: column; }
+  .uc.planned { background: rgba(255, 255, 255, .45); }
+  .uc-head { display: flex; justify-content: space-between; align-items: flex-start; gap: 10px; }
+  .uc h3 { font: 600 16.5px/1.3 var(--serif); margin: 0 0 6px; }
+  .uc .tag { font: 500 10.5px var(--mono); color: var(--muted); border: 1px solid var(--line); border-radius: 999px; padding: 1px 7px; vertical-align: middle; margin-left: 4px; }
+  .pill { flex-shrink: 0; font: 500 10.5px var(--mono); text-transform: uppercase; letter-spacing: .04em; padding: 3px 8px; border-radius: 999px; }
+  .pill.runnable { color: #047857; background: #d1fae5; }
+  .pill.partial { color: #92400e; background: #fef3c7; }
+  .pill.planned { color: var(--muted); background: #eef2f7; }
+  .uc p { font-size: 14px; margin: 0 0 10px; }
+  .uc p.q { color: var(--text); }
+  .uc dl { margin: 0 0 8px; font-size: 13px; display: grid; grid-template-columns: auto 1fr; gap: 4px 10px; }
+  .uc dt { color: var(--muted); white-space: nowrap; }
+  .uc dd { margin: 0; }
+  .uc p.gap { font-size: 12.5px; color: var(--muted); margin: 4px 0 8px; }
+  .uc .how { margin-top: auto; padding-top: 6px; font: 12px var(--mono); color: var(--accent); }
+  p.und { margin-top: 28px; font-size: 14px; }
+
   /* Code */
   pre.code {
     font: 13px/1.6 var(--mono); background: var(--text); color: #e2e8f0;
@@ -139,7 +161,7 @@
     .wrap { padding: 0 16px; }
     header.hero { padding: 48px 0; }
     .nav nav a:not(:nth-child(-n+2)) { display: none; }
-    .agent-grid { grid-template-columns: 1fr; }
+    .agent-grid, .uc-grid { grid-template-columns: 1fr; }
     .stat-grid { grid-template-columns: 1fr 1fr; }
     .stat:nth-child(3) { border-left: 0; padding-left: 0; border-top: 1px solid var(--line); }
     .stat:nth-child(4) { border-top: 1px solid var(--line); }
@@ -154,8 +176,9 @@
     <a class="brand" href="#">Seesaw<span>.</span></a>
     <nav>
       <a href="#overview">Overview</a>
+      <a href="#use-cases">Use cases</a>
       <a href="#start">Get started</a>
-      <a href="#pathways">Pathways</a>
+      <a href="#pathways">Methods</a>
       <a href="#agents">Agents</a>
       <a href="#tools">Tools</a>
       <a href="#evals">Evals</a>
@@ -168,7 +191,7 @@
   <div class="wrap">
     <div class="kicker">Agentic AI Safety</div>
     <h1>Seesaw</h1>
-    <p class="tagline">A multi-agent system that automates the end-to-end hypothesis → experiment → critique loop in mechanistic interpretability research.</p>
+    <p class="tagline">A multi-agent system that uses interpretability to monitor, audit and fix AI models, with every use case measured against the best way to do the job without it.</p>
     <div class="cta-row">
       <a class="btn primary" href="https://github.com/vijpandaturtle/seesaw">GitHub</a>
       <a class="btn" href="https://seesaw-web-five.vercel.app/">Live Dashboard ↗</a>
@@ -180,7 +203,7 @@
 <section id="overview">
   <div class="wrap">
     <h2>Overview</h2>
-    <p>You ask a research question. Scout picks one of eight hand-coded pathways and chooses its inputs, and you approve both before anything runs on a model. Lens runs the pathway, and Quill reviews the result like a peer reviewer. Every result is labelled with how strong its evidence is (correlational, estimate or causal) and whether its controls ran.</p>
+    <p>You pick a safety use case, or ask a question. Scout picks the pathway that does the job and chooses its inputs, and you approve both before anything runs on a model. Lens runs the pathway, and Quill reviews the result like a peer reviewer. Every result is labelled with how strong its evidence is (correlational, estimate or causal) and whether its controls ran.</p>
     <div class="pipeline">
       <span class="stage">Scout</span>
       <span class="arrow">question → research plan →</span>
@@ -193,6 +216,154 @@
   </div>
 </section>
 
+<section id="use-cases">
+  <div class="wrap">
+    <h2>Safety use cases</h2>
+    <p>Seesaw is organized around AI safety jobs, not techniques. Each use case is scored by an outcome metric and compared with the best way to do the job without interpretability, so a result says whether looking inside the model actually helped.</p>
+    <p>Today 1 is runnable end to end, 4 run a pathway but don't yet run the baseline arm, and 8 are planned. Most planned audits need model organisms: small models with a planted backdoor, objective or hidden capability, so an audit can be scored against the plant.</p>
+    <h3 class="area"><span>Monitor</span> catch unsafe behavior at runtime</h3>
+    <div class="uc-grid">
+        <div class="uc runnable">
+          <div class="uc-head"><h3>Build a safety monitor</h3><span class="pill runnable">Runnable</span></div>
+          <p class="q">Would a monitor on the model&#x27;s activations flag deception, prompt injection or harmful intent on new texts, better than the words alone?</p>
+          <dl>
+            <dt>Scored by</dt><dd>held-out accuracy of the activation probe, on texts from a different source</dd>
+            <dt>Compared with</dt><dd>bag-of-words and embeddings-only probes on the same texts, and shuffled labels</dd>
+          </dl>
+          
+          <div class="how">probe_monitor</div>
+        </div>
+        <div class="uc planned">
+          <div class="uc-head"><h3>Check reasoning faithfulness</h3><span class="pill planned">Planned</span></div>
+          <p class="q">Does the model&#x27;s stated reasoning reflect what actually drives its answer?</p>
+          <dl>
+            <dt>Scored by</dt><dd>how often the stated reason matches the input the answer causally depends on</dd>
+            <dt>Compared with</dt><dd>counterfactual edits to the prompt, read off the output alone</dd>
+          </dl>
+          <p class="gap">Needs: a pathway that plants a hint the answer depends on and checks whether the reasoning mentions it, with attribution to tell what the answer used.</p>
+          
+        </div>
+    </div>
+    <h3 class="area"><span>Audit</span> find a hidden problem before deployment</h3>
+    <div class="uc-grid">
+        <div class="uc planned">
+          <div class="uc-head"><h3>Find failure modes</h3><span class="pill planned">Planned</span></div>
+          <p class="q">Where does my model break or behave unsafely, and can its internals point me there faster?</p>
+          <dl>
+            <dt>Scored by</dt><dd>distinct failures found under a fixed query budget, and how severe they are</dd>
+            <dt>Compared with</dt><dd>black-box red-teaming and fuzzing under the same budget</dd>
+          </dl>
+          <p class="gap">Needs: a pathway that searches from the model&#x27;s internals (push along a direction or feature, or attack the activations, then find real inputs that do the same) and a scorer for distinct failures; find_a_backdoor is its version with a planted answer.</p>
+          
+        </div>
+        <div class="uc planned">
+          <div class="uc-head"><h3>Find a backdoor</h3><span class="pill planned">Planned</span></div>
+          <p class="q">Does this model have a hidden trigger that switches on bad behavior, and what is it?</p>
+          <dl>
+            <dt>Scored by</dt><dd>whether the trigger was identified, and in how many queries</dd>
+            <dt>Compared with</dt><dd>black-box red-teaming under the same query budget</dd>
+          </dl>
+          <p class="gap">Needs: model organisms with a planted trigger (a LoRA on a small model) and a pathway that searches under a fixed query budget.</p>
+          
+        </div>
+        <div class="uc planned">
+          <div class="uc-head"><h3>Audit a hidden objective</h3><span class="pill planned">Planned</span></div>
+          <p class="q">Is this model pursuing a goal it wasn&#x27;t meant to have?</p>
+          <dl>
+            <dt>Scored by</dt><dd>whether the audit names the planted goal or behavior</dd>
+            <dt>Compared with</dt><dd>behavioral testing and prompting</dd>
+          </dl>
+          <p class="gap">Needs: model organisms with a planted objective; Scout and Lens would plan the audit freely, scored against the plant.</p>
+          
+        </div>
+        <div class="uc planned">
+          <div class="uc-head"><h3>Detect sandbagging</h3><span class="pill planned">Planned</span></div>
+          <p class="q">Is the model deliberately underperforming on a capability evaluation?</p>
+          <dl>
+            <dt>Scored by</dt><dd>accuracy at telling sandbagging model organisms from honest ones, and false alarms</dd>
+            <dt>Compared with</dt><dd>behavioral evals: elicitation with fine-tuning or few-shot prompting</dd>
+          </dl>
+          <p class="gap">Needs: model organisms trained to hide a capability, and a pathway that compares what the activations know with what the output says.</p>
+          
+        </div>
+        <div class="uc partial">
+          <div class="uc-head"><h3>Audit a fine-tune</h3><span class="pill partial">Baseline missing</span></div>
+          <p class="q">Did a fine-tune change more than it was meant to, such as making the model broadly misaligned?</p>
+          <dl>
+            <dt>Scored by</dt><dd>recall of a planted change, and false alarms</dd>
+            <dt>Compared with</dt><dd>comparing the two models&#x27; outputs on eval sets</dd>
+          </dl>
+          <p class="gap">Missing: model_diffing reports where the models differ; it has no fine-tunes with a planted change to score recall and false alarms against, and no output-diff baseline.</p>
+          <div class="how">model_diffing</div>
+        </div>
+    </div>
+    <h3 class="area"><span>Fix</span> remove or steer an unsafe behavior</h3>
+    <div class="uc-grid">
+        <div class="uc partial">
+          <div class="uc-head"><h3>Steer away from unsafe behavior</h3><span class="pill partial">Baseline missing</span></div>
+          <p class="q">Can I turn down a behavior like sycophancy or bias without damaging everything else?</p>
+          <dl>
+            <dt>Scored by</dt><dd>size of the targeted change, against collateral damage on unrelated text</dd>
+            <dt>Compared with</dt><dd>prompting, and safety fine-tuning</dd>
+          </dl>
+          <p class="gap">Missing: concept_direction measures the change against random directions and checks control texts; it doesn&#x27;t yet run a prompting baseline.</p>
+          <div class="how">concept_direction</div>
+        </div>
+        <div class="uc partial">
+          <div class="uc-head"><h3>Remove a spurious correlation</h3><span class="pill partial">Baseline missing</span></div>
+          <p class="q">Does the answer depend on something it shouldn&#x27;t, like a name or a dialect, and can I remove that without breaking the task?</p>
+          <dl>
+            <dt>Scored by</dt><dd>accuracy on a balanced or shifted test set after the fix</dd>
+            <dt>Compared with</dt><dd>fine-tuning or reweighting on rebalanced data</dd>
+          </dl>
+          <p class="gap">Missing: spurious_audit measures the dependence and checks the task survives erasure; it doesn&#x27;t yet score a shifted test set or run a rebalanced baseline.</p>
+          <div class="how">spurious_audit</div>
+        </div>
+        <div class="uc partial">
+          <div class="uc-head"><h3>Edit or unlearn knowledge</h3><span class="pill partial">Baseline missing</span></div>
+          <p class="q">Can I remove hazardous knowledge, or correct a fact, and keep the rest of what the model knows?</p>
+          <dl>
+            <dt>Scored by</dt><dd>forgetting on the target (a WMDP-style set), against ability kept elsewhere; for edits, efficacy and paraphrases against damage to neighboring facts</dd>
+            <dt>Compared with</dt><dd>gradient-ascent unlearning; fine-tuning on the corrected fact</dd>
+          </dl>
+          <p class="gap">Missing: editing_comparison scores ROME edits on single facts; it doesn&#x27;t yet unlearn a body of knowledge or run a gradient-based baseline.</p>
+          <div class="how">editing_comparison · factual_recall</div>
+        </div>
+        <div class="uc planned">
+          <div class="uc-head"><h3>Resist prompt injection in images <span class="tag">vision</span></h3><span class="pill planned">Planned</span></div>
+          <p class="q">Does text written in an image override what the image shows, or what the user asked?</p>
+          <dl>
+            <dt>Scored by</dt><dd>accuracy on attacked images, against accuracy on clean ones</dd>
+            <dt>Compared with</dt><dd>prompting, and a light fine-tune on attacked images</dd>
+          </dl>
+          <p class="gap">Needs: the lever tools can find and ablate the heads that read the text; there&#x27;s no pathway or attacked test set yet.</p>
+          <div class="how">clip_direct_effects · clip_head_ablation · activation_patching (lever)</div>
+        </div>
+        <div class="uc planned">
+          <div class="uc-head"><h3>Reduce object hallucination <span class="tag">vision</span></h3><span class="pill planned">Planned</span></div>
+          <p class="q">Is my VLM answering from the image, or making things up from what the language model expects?</p>
+          <dl>
+            <dt>Scored by</dt><dd>accuracy on yes/no object questions (POPE-style)</dd>
+            <dt>Compared with</dt><dd>prompting, and contrastive decoding</dd>
+          </dl>
+          <p class="gap">Needs: the lever tools measure how much an answer needs the image; there&#x27;s no pathway yet that intervenes and scores hallucination.</p>
+          <div class="how">vision_ablation · image_token_ablation · logit_lens (lever)</div>
+        </div>
+        <div class="uc planned">
+          <div class="uc-head"><h3>Remove a spurious background <span class="tag">vision</span></h3><span class="pill planned">Planned</span></div>
+          <p class="q">Is my image classifier using the background instead of the object?</p>
+          <dl>
+            <dt>Scored by</dt><dd>worst-group accuracy on a balanced test set (Waterbirds)</dd>
+            <dt>Compared with</dt><dd>group reweighting, and retraining the linear head</dd>
+          </dl>
+          <p class="gap">Needs: the lever tools nominate and ablate CLIP heads; there&#x27;s no pathway yet that picks heads and scores worst-group accuracy.</p>
+          <div class="how">clip_direct_effects · clip_head_ablation (lever)</div>
+        </div>
+    </div>
+    <p class="und">Three more entries cover understanding a model, with no outcome to beat: understand a capability (<code>circuit_discovery</code>), locate a fact (<code>factual_recall</code>), explain an output (<code>feature_explain</code>).</p>
+  </div>
+</section>
+
 <section id="start">
   <div class="wrap">
     <h2>Get started</h2>
@@ -202,16 +373,17 @@ uv venv .venv --python 3.12 &amp;&amp; source .venv/bin/activate
 uv pip install -e ".[experiments]"
 cp .env.example .env   <span class="c"># set ANTHROPIC_API_KEY (and HF_TOKEN for Gemma or Llama)</span>
 
-<span class="c"># run a job, approving at each gate as it goes</span>
+<span class="c"># list the use cases, then run one, approving at each gate as it goes</span>
+seesaw use-cases
 seesaw jobs submit "Does the model use the gender a job title implies to choose 'she' or 'he'?" \
-  --pathway concept_direction --model Qwen/Qwen2.5-1.5B --follow</pre>
-    <p>Leave out <code>--pathway</code> and Scout picks one, or none, and plans the experiments itself. <code>--search</code> lets it search arXiv and the web. <code>seesaw jobs rerun &lt;id&gt; --model &lt;other&gt;</code> runs the same experiment on another model. Sample questions for every pathway are in <a href="https://github.com/vijpandaturtle/seesaw/blob/main/docs/use-cases.md">the use-cases guide</a>.</p>
+  --use-case steer_unsafe_behavior --model Qwen/Qwen2.5-1.5B --follow</pre>
+    <p><code>--use-case</code> runs that use case's pathway. Leave it out and Scout picks a pathway, or none, and plans the experiments itself. <code>--search</code> lets it search arXiv and the web. <code>seesaw jobs rerun &lt;id&gt; --model &lt;other&gt;</code> runs the same experiment on another model. Sample questions for every pathway are in <a href="https://github.com/vijpandaturtle/seesaw/blob/main/docs/use-cases.md">the use-cases guide</a>.</p>
   </div>
 </section>
 <section id="pathways">
   <div class="wrap">
-    <h2>Pathways</h2>
-    <p>Fixed investigations with a deterministic verdict, each checked against a known answer. They're the expert baseline Lens is judged against. Pathways run on any TransformerLens model, and rerunning a job with <code>--model</code> repeats the same experiment on another one, so models can be compared on identical inputs.</p>
+    <h2>Methods: pathways</h2>
+    <p>The methods the use cases run. Each is a fixed investigation with a deterministic verdict, checked against a known answer. They're the expert baseline Lens is judged against. Pathways run on any TransformerLens model, and rerunning a job with <code>--model</code> repeats the same experiment on another one, so models can be compared on identical inputs.</p>
     <table class="tools">
       <tr><th>Pathway</th><th>Answers</th></tr>
       <tr><td class="tool-name">circuit_<wbr>discovery</td><td>What mechanism does the model use? Nominate heads, verify heads and MLPs by patching, and check the circuit is faithful.</td></tr>
