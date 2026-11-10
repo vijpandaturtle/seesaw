@@ -1,9 +1,7 @@
 """Fixtures for the deterministic eval tests.
 
-These tests check what the agents actually produced against findings that are
-already established in the literature — L9H9 as an IOI name mover, mid-layer
-MLPs carrying factual recall, and so on. They assert on the run's artifacts
-rather than re-running any model, so they're fast and free.
+These tests check what an agent actually produced. They assert on the run's
+artifacts rather than re-running the agent.
 
 The runner writes the artifact paths into the environment before invoking
 pytest (see eval/runner/handlers.py::_artifact_env). Running these directly is

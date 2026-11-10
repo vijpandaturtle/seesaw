@@ -1,8 +1,7 @@
 # Tier 2 and 3: evals that call live agents, and therefore cost money.
 #
-# Deliberately not on push. Every task here spends Anthropic credit, and the
-# pipeline tasks run all three agents for the better part of an hour — a merge
-# should not silently do that. Run it by hand before a release, or let the
+# Deliberately not on push. Every task here spends Anthropic credit, and a
+# merge should not silently do that. Run it by hand before a release, or let the
 # weekly schedule catch drift in the agents' behaviour over time.
 #
 # Scores are compared against eval/baselines.json, so a task that used to pass
@@ -12,11 +11,6 @@ name: evals
 on:
   workflow_dispatch:
     inputs:
-      suite:
-        description: Which tasks to run
-        type: choice
-        default: cheap
-        options: [cheap, pipeline, all]
       update_baselines:
         description: Record the results as the new baseline instead of checking against it
         type: boolean
@@ -28,8 +22,7 @@ on:
 jobs:
   evals:
     runs-on: ubuntu-latest
-    # Pipeline tasks run Scout, Lens, and Quill end to end.
-    timeout-minutes: 360
+    timeout-minutes: 90
 
     steps:
       - uses: actions/checkout@v4
@@ -61,7 +54,7 @@ jobs:
           FIRECRAWL_API_KEY: ${{ secrets.FIRECRAWL_API_KEY }}
           # Force SQLite: an eval run must not write into the deployed job store.
           SEESAW_DB_PATH: ${{ github.workspace }}/outputs/ci-jobs.db
-        run: uv run python scripts/run_eval_suite.py --suite '${{ inputs.suite || ''cheap'' }}'
+        run: uv run python scripts/run_eval_suite.py
 
       - name: Check against baselines
         if: ${{ !inputs.update_baselines }}

@@ -42,9 +42,8 @@ lever = [
     "lever-interp @ git+https://github.com/vijpandaturtle/lever-interp.git",
     "pillow",
 ]
-# LangSmith experiment tracking for the eval suite
+# The eval suite and the test suite
 eval = [
-    "langsmith",
     "pytest",
 ]
 # Running Lens experiments on Modal instead of in-process
