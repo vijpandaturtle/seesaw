@@ -39,7 +39,7 @@ A plain `uv pip install -e .` installs only Scout, Quill and the orchestrator, w
 |---|---|---|
 | `experiments` | torch, TransformerLens, SAELens, matplotlib | Lens, the pathways, `seesaw.interp` |
 | `lever` | [lever-interp](https://github.com/vijpandaturtle/lever-interp), pillow | Vision-language models (`SEESAW_INTERP_BACKEND=lever`); install with `experiments` |
-| `eval` | LangSmith, pytest | The eval suite and the test suite |
+| `eval` | pytest | The eval suite and the test suite |
 | `modal` | Modal | Running Lens experiments on Modal |
 | `postgres` | psycopg | A hosted job store (`DATABASE_URL`) |
 | `all` | All of the above except `lever` | |
@@ -54,7 +54,7 @@ Set in `.env` (see `.env.example`):
 |---|---|---|
 | `ANTHROPIC_API_KEY` | Yes | All three agents, and the eval suite's LLM judge |
 | `FIRECRAWL_API_KEY` | No | Scout's `search_web` and `scrape_url`, used only with `--search`. Without it those two return nothing, and `search_arxiv` still works. |
-| `LANGSMITH_API_KEY` | No | The LangSmith eval runner and tracing |
+| `LANGSMITH_API_KEY` | No | LangChain tracing of the agents' runs, if you want it |
 | `NEURONPEDIA_API_KEY` | No | Neuronpedia's write endpoints. Feature labels and reads need no key. |
 | `SEESAW_NEURONPEDIA_PUBLISH` | No | `1` lets `circuit_tracing` generate attribution graphs on Neuronpedia. Generated graphs and their prompts are public. |
 | `SEESAW_INTERP_BACKEND` | No | `lever` runs Lens on vision-language models; default `seesaw` (see [Interp Backends](#interp-backends-seesaw-and-lever)) |
@@ -444,12 +444,12 @@ The eval suite lives in `eval/` and is built in three layers. The core rule: **f
 ```
 eval/
 ├── graders/      # 29 pure grading functions (scout.py, lens.py, quill.py)
-│   ├── base.py               # GraderResult, judge() (LLM-as-judge)
-│   └── langsmith_adapter.py  # wrap any grader into a LangSmith evaluator
+│   └── base.py               # GraderResult, judge() (LLM-as-judge)
 ├── fixtures/     # 56 canned artifacts with known verdicts — the grader meta-eval
-├── tasks/        # 15 live-agent benchmark tasks (*.yaml) + loader
+├── tasks/        # 7 live-agent benchmark tasks (*.yaml) + loader
 ├── rubrics/      # 5 markdown rubrics used by llm_rubric graders
-└── runner/       # executes tasks: agent adapters, grader dispatch, LangSmith upload
+├── tests/        # checks run against a task's artifacts (deterministic_tests)
+└── runner/       # executes tasks: agent adapters, grader dispatch, persistence
 ```
 
 ### Layer 1 — Graders (`eval/graders/`)
@@ -481,7 +481,7 @@ A mismatch means the grader **or the fixture label** is wrong — read the judge
 
 ### Layer 3 — Tasks (`eval/tasks/`) and the runner (`eval/runner/`)
 
-A task is a YAML spec: a unit of work for the live agents plus the graders to apply to whatever they produce. There is no per-task `expected:` — the score *is* the measurement. Balance comes from paired opposites instead: 8 ground-truth circuit tasks (IOI, greater-than, gender bias, induction, successor, copy suppression, ROME, docstring) and 7 adversarial probes (tool-bias questions Scout should refuse to force-fit, a causal-language trap for Lens, weak/strong calibration bundles for Quill).
+A task is a YAML spec: a unit of work for the live agents plus the graders to apply to whatever they produce. There is no per-task `expected:` — the score *is* the measurement. The 7 tasks are adversarial probes, each run on one agent: tool-bias questions Scout should refuse to force-fit, a causal-language trap for Lens, weak/strong calibration bundles and a follow-up round trip for Quill. Known answers on real models are checked on the pathways instead, in `tests/test_pathways_models.py`.
 
 Grader `type` vocabulary (validated by `eval/tasks/loader.py`):
 
@@ -498,10 +498,11 @@ Handlers never silently pass: a missing test file or unimplemented `state_check`
 ```bash
 seesaw eval --list                                    # all tasks
 seesaw eval quill_weak_bundle_1                       # run one locally → outputs/eval_runs/*.json
-python -m eval.runner.langsmith_runner --all-cheap    # run non-pipeline tasks as a LangSmith experiment
+python scripts/run_eval_suite.py                      # run every task
+python scripts/check_eval_baselines.py                # compare the latest runs against eval/baselines.json
 ```
 
-The LangSmith runner registers every task as an example in the `seesaw-tasks` dataset, executes agents via `run_task`, and fans each grader result out as its own feedback score — so the experiment table shows one column per criterion, comparisons across experiments give per-criterion regressions, and `LANGSMITH_TRACING` nests the full agent trace under each row. Requires `LANGSMITH_API_KEY` in `.env`. Persisted runs are also readable straight from `outputs/eval_runs/*.json`.
+Each run is written to `outputs/eval_runs/*.json`.
 
 ### Adding to the suite
 
@@ -511,8 +512,8 @@ The LangSmith runner registers every task as an example in the `seesaw-tasks` da
 
 ### Known gaps
 
-- The `deterministic_tests` files live in `eval/tests/`. They assert published findings (IOI name movers, ROME's mid-layer localisation, and so on) against the run's artifacts, and read those artifacts from environment variables the runner sets — so they can also be run directly with `SEESAW_EVAL_BUNDLE=<bundle.json> pytest eval/tests -q`.
-- Token usage (`n_total_tokens`) is captured for Scout but not Lens/Quill (their graphs are `invoke()`d; per-call usage is visible in LangSmith traces instead).
+- The `deterministic_tests` files live in `eval/tests/`. They check a run's artifacts (today, that Quill's follow-ups execute in Lens), and read those artifacts from environment variables the runner sets — so they can also be run directly with `SEESAW_EVAL_BUNDLE=<bundle.json> pytest eval/tests -q`.
+- Token usage (`n_total_tokens`) is captured for Scout but not Lens/Quill (their graphs are `invoke()`d).
 - Human graders (`researcher_would_run`, `matches_expert`) export review payloads but no expert scores have been recorded yet.
 
 ---

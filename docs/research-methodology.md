@@ -12,8 +12,7 @@ Seesaw has the parts of a methodology but not the methodology. The parts are goo
 - Scout's prompt says "a strong plan nominates with a cheap tool and verifies with a causal one".
 - Quill's prompts warn that attention isn't causation and that estimates aren't effects.
 - The eval suite checks some of it: `causal_correlational_honesty` grades Lens summaries,
-  `ioi_circuit` requires an ablation, and `lens_causal_language_trap` withholds causal tools on
-  purpose.
+  and `lens_causal_language_trap` withholds causal tools on purpose.
 
 What's missing is structure. All of the above is prose in prompts, so nothing holds a job to it:
 
@@ -149,8 +148,8 @@ Use the existing eval suite, before and after, against `eval/baselines.json`.
   - `quill.claim_tier_calibration`: on the planted weak/strong bundles, `evidence_tier` matches the
     tools actually run, and over-claims are flagged.
 - **Fix** `causal_correlational_honesty` to read the active backend's catalog.
-- **Rerun**: `ioi_circuit`, `lens_causal_language_trap`, `quill_weak_bundle`, `quill_strong_bundle`,
-  `gender_bias`, `successor_heads`.
+- **Rerun**: `lens_causal_language_trap`, `quill_weak_bundle`, `quill_strong_bundle`,
+  `quill_followup_loop`.
 
 If plans and critiques don't measurably improve, that's the cheapest point to find out.
 

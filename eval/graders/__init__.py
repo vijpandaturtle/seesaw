@@ -15,11 +15,10 @@ without hard-coding names.
 
 from . import lens, quill, scout
 from .base import GraderResult, GraderType, field, judge
-from .langsmith_adapter import evaluator, to_langsmith_dict
 
 __all__ = [
     "scout", "lens", "quill", "GraderResult", "GraderType", "field", "judge",
-    "evaluator", "to_langsmith_dict", "REGISTRY",
+    "REGISTRY",
 ]
 
 # (agent, criterion, kind) -> callable. The kind mirrors the grader's GraderType.
