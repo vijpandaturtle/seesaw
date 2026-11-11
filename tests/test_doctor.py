@@ -105,3 +105,24 @@ def test_env_file_is_read_from_the_working_directory(tmp_path):
 def test_version_flag():
     out = subprocess.run([sys.executable, "-m", "seesaw.cli", "--version"], capture_output=True, text=True)
     assert out.stdout.startswith("seesaw ")
+
+
+def test_a_cached_config_is_not_cached_weights(monkeypatch, tmp_path):
+    """Loading a tokenizer caches config.json; only the weights mean no download."""
+    import huggingface_hub
+
+    index = tmp_path / "index.json"
+    index.write_text('{"weight_map": {"a": "model-1.safetensors", "b": "model-2.safetensors"}}')
+
+    def fake_cache(files):
+        return lambda model, name: files.get(name)
+    monkeypatch.setattr(huggingface_hub, "try_to_load_from_cache", fake_cache({"config.json": "x"}))
+    assert not doctor.is_cached("m")
+    monkeypatch.setattr(huggingface_hub, "try_to_load_from_cache", fake_cache({"model.safetensors": "x"}))
+    assert doctor.is_cached("m")
+    shards = {"model.safetensors.index.json": str(index), "model-1.safetensors": "x"}
+    monkeypatch.setattr(huggingface_hub, "try_to_load_from_cache", fake_cache(shards))
+    assert not doctor.is_cached("m")                                   # one shard missing
+    monkeypatch.setattr(huggingface_hub, "try_to_load_from_cache",
+                        fake_cache({**shards, "model-2.safetensors": "x"}))
+    assert doctor.is_cached("m")

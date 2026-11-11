@@ -109,10 +109,22 @@ def hf_cache_dir() -> Path:
 
 
 def is_cached(model: str) -> bool:
+    """Are the model's weights downloaded? Its config alone often is (a tokenizer
+    load fetches it), so look for the weights: one file, or every shard an index names."""
     try:
+        import json
+
         from huggingface_hub import try_to_load_from_cache
 
-        return isinstance(try_to_load_from_cache(model, "config.json"), str)
+        def have(name: str) -> str | None:
+            path = try_to_load_from_cache(model, name)
+            return path if isinstance(path, str) else None
+
+        index = have("model.safetensors.index.json")
+        if index:
+            shards = set(json.loads(Path(index).read_text())["weight_map"].values())
+            return all(have(s) for s in shards)
+        return have("model.safetensors") is not None
     except Exception:                              # noqa: BLE001
         return False
 
