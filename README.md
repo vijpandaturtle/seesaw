@@ -44,6 +44,7 @@ uv venv .venv --python 3.12 && source .venv/bin/activate
 uv pip install -e ".[experiments]"   # Lens needs torch + TransformerLens
 
 cp .env.example .env                 # set ANTHROPIC_API_KEY (and HF_TOKEN for Gemma or Llama)
+seesaw doctor                        # checks keys, model access, memory, torch and the job store
 ```
 
 Then ask a question whose answer is already known, so you can check the verdict:
@@ -53,7 +54,7 @@ seesaw jobs submit "Does the model use the gender a job title implies to choose 
   --pathway concept_direction --model Qwen/Qwen2.5-1.5B --follow
 ```
 
-`--follow` streams the job's log and asks you to approve at each gate: once for Scout's plan and inputs, once before Quill critiques the results. The job runs on your machine and is stored in a local SQLite file. Qwen2.5 is open, so this needs no Hugging Face token; the default model, `google/gemma-2-2b`, is gated, as are the Llama models. Artifacts land in `outputs/jobs/<id>/`.
+`--follow` streams the job's log and asks you to approve at each gate: once for Scout's plan and inputs, once before Quill critiques the results. The job runs on your machine and is stored in a local SQLite file. Qwen2.5 is open, so this needs no Hugging Face token. It's also the default model when you leave out `--model`. Gemma and Llama are gated: accept the license on Hugging Face and set `HF_TOKEN`, then run `seesaw doctor --model google/gemma-2-2b` to check access. Artifacts land in `outputs/jobs/<id>/`.
 
 Leave out `--pathway` and Scout chooses one (or none, and plans the experiments itself). Add `--search` to let Scout search arXiv and the web while it plans; this needs `FIRECRAWL_API_KEY` for web search.
 
@@ -65,6 +66,7 @@ Leave out `--pathway` and Scout chooses one (or none, and plans the experiments 
 
 | Command | Does |
 |---|---|
+| `seesaw doctor [--model M]` | Check this machine is ready: keys, model access, memory and disk, torch, the job store |
 | `seesaw jobs submit "<question>"` | Start a research job: Scout → gate → Lens → gate → Quill. `--pathway`, `--model`, `--search`, `--auto-approve`, `--follow` |
 | `seesaw jobs list` / `show` / `logs` | See jobs, their status and artifacts, and the worker's log |
 | `seesaw jobs approve` / `retry` / `cancel` | Drive a job: clear a gate, re-run a failed stage, stop it |

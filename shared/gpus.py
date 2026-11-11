@@ -17,11 +17,17 @@ GPU_LARGE: str = os.getenv("SEESAW_GPU_LARGE", "A100-80GB")
 LARGE_MODEL_PARAMS_B: float = 4.0
 
 
-def gpu_for(model_name: str) -> str:
-    """The Modal GPU for `model_name`, by the parameter count in its name ('Qwen2.5-7B' → 7).
+def params_b(model_name: str) -> float | None:
+    """Billions of parameters, read from the name ('Qwen2.5-7B' → 7.0); None when it names no size.
 
-    Read from the name rather than the config so routing needs no download
-    (and no token for gated models). Names without a size are small.
+    Read from the name rather than the config so it needs no download (and no
+    token for gated models).
     """
     sizes = [float(x) for x in re.findall(r"(?<![\d.])(\d+(?:\.\d+)?)[bB](?![a-zA-Z])", model_name)]
-    return GPU_LARGE if sizes and max(sizes) > LARGE_MODEL_PARAMS_B else GPU_SMALL
+    return max(sizes) if sizes else None
+
+
+def gpu_for(model_name: str) -> str:
+    """The Modal GPU for `model_name`, by the parameter count in its name. Names without a size are small."""
+    size = params_b(model_name)
+    return GPU_LARGE if size and size > LARGE_MODEL_PARAMS_B else GPU_SMALL

@@ -79,7 +79,7 @@ def test_missing_and_misaligned_inputs_are_named():
 
 
 def test_unexpected_inputs_are_refused():
-    problems = catalog.validate("feature_explain", {**IOI, "corrupted_prompts": ["x"]})
+    problems = catalog.validate("feature_explain", {**IOI, "corrupted_prompts": ["x"]}, model="google/gemma-2-2b")
     assert problems == ["feature_explain does not take 'corrupted_prompts'"]
 
 

@@ -69,7 +69,7 @@ def jobs(tmp_path, monkeypatch):
 def seesaw(monkeypatch, *argv) -> int:
     from seesaw import cli
 
-    monkeypatch.setattr(cli, "load_dotenv", lambda: None)
+    monkeypatch.setattr(cli, "_load_env", lambda: None)
     monkeypatch.setattr(sys, "argv", ["seesaw", *argv])
     return cli.main()
 
