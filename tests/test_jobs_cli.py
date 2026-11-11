@@ -43,7 +43,7 @@ def launched(monkeypatch):
 def seesaw(monkeypatch, *argv) -> int:
     from seesaw import cli
 
-    monkeypatch.setattr(cli, "load_dotenv", lambda: None)   # keep a real .env out of the test
+    monkeypatch.setattr(cli, "_load_env", lambda: None)   # keep a real .env out of the test
     monkeypatch.setattr(sys, "argv", ["seesaw", *argv])
     return cli.main()
 

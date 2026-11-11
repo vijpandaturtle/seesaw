@@ -5,6 +5,7 @@
     seesaw critique <bundle.json>         Quill only: bundle -> critique report
     seesaw eval <task_id> | --list        Run an eval task against the live agents
     seesaw fixtures [--llm [AGENT]]       Grader meta-eval (offline free; --llm costs)
+    seesaw doctor [--model M] [--offline] Check this machine is ready to run a job
     seesaw jobs submit|list|show|approve|retry|cancel|logs|open
                                           Jobs in the shared store the dashboard reads
 
@@ -24,7 +25,7 @@ import sys
 import time
 from pathlib import Path
 
-from dotenv import load_dotenv
+from dotenv import find_dotenv, load_dotenv
 
 
 def _cmd_plan(args) -> int:
@@ -102,6 +103,12 @@ def _cmd_fixtures(args) -> int:
     return 0 if not res["mismatches"] else 1
 
 
+def _cmd_doctor(args) -> int:
+    from .doctor import cmd_doctor
+
+    return cmd_doctor(args, args.env_file)
+
+
 def _cmd_use_cases(args) -> int:
     from . import use_cases
 
@@ -134,11 +141,34 @@ def _write_json(path: str, payload: dict) -> None:
     print(f"wrote {out}")
 
 
-def main() -> int:
+def _load_env() -> str | None:
+    """Load .env from the folder seesaw runs in (or a parent), then the repo's.
+
+    An installed seesaw (uv tool install, pip) lives in site-packages, where
+    load_dotenv's default search starts; a tester's .env is where they run it.
+    Values already set win, so the environment overrides either file.
+    """
+    found = find_dotenv(usecwd=True)
+    if found:
+        load_dotenv(found)
     load_dotenv()
+    return found or None
+
+
+def main() -> int:
+    env_file = _load_env()
+    from . import __version__
+
     parser = argparse.ArgumentParser(prog="seesaw", description=__doc__,
                                      formatter_class=argparse.RawDescriptionHelpFormatter)
+    parser.add_argument("--version", action="version", version=f"seesaw {__version__}")
     sub = parser.add_subparsers(dest="command", required=True)
+
+    p = sub.add_parser("doctor", help="check this machine is ready to run a job (keys, models, torch, store)")
+    p.add_argument("--model", action="append",
+                   help="a model you'll run on; repeat for several (default: the default model)")
+    p.add_argument("--offline", action="store_true", help="skip the network checks")
+    p.set_defaults(fn=_cmd_doctor, env_file=env_file)
 
     p = sub.add_parser("plan", help="Scout: research question -> plan")
     p.add_argument("question")

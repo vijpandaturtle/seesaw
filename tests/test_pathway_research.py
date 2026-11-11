@@ -129,10 +129,11 @@ def lens(monkeypatch):
         seen["replays"].append(replay)
         if seen["fail"]:
             raise RuntimeError("Lens fell over")
-        bundle = {"research_question": "IOI", "model_name": DEFAULT_MODEL, "n_total": 1,
+        # Lens's extras run on Gemma, so a rerun can tell "keep each on its own model" from the default.
+        bundle = {"research_question": "IOI", "model_name": "google/gemma-2-2b", "n_total": 1,
                   "n_success": 1, "n_failed": 0,
                   "results": [{"name": "logit_lens_ioi", "tool": "logit_lens",
-                               "model_name": DEFAULT_MODEL, "prompts": IOI["prompts"],
+                               "model_name": "google/gemma-2-2b", "prompts": IOI["prompts"],
                                "summary": "answer appears at layer 9", "status": "success"}]}
         path = output_dir / "results_bundle.json"
         path.write_text(json.dumps(bundle))
@@ -502,7 +503,7 @@ def test_search_is_off_unless_the_job_asks_for_it(jobs, scout):
 
 
 def test_the_choice_brief_lists_each_pathway_with_its_inputs():
-    brief = catalog.choice_brief(DEFAULT_MODEL)
+    brief = catalog.choice_brief("google/gemma-2-2b")             # has SAEs, so every pathway is offered
     for name in ("circuit_discovery", "concept_direction", "model_diffing", "feature_explain"):
         assert f"`{name}`" in brief
     assert "`other_model` (one string)" in brief

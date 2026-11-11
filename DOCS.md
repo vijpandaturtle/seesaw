@@ -70,6 +70,7 @@ Deployment adds several more; see [Deployment → Environment reference](#enviro
 
 | Command | Does |
 |---|---|
+| `seesaw doctor [--model M] [--offline]` | Check this machine is ready to run a job: the Anthropic key, Hugging Face access to each model, whether it fits in memory and on disk, torch and its device, the job store, and Modal when Lens runs there. Exits 1 if anything would stop a job. |
 | `seesaw jobs …` | Submit and drive jobs in the job store, the main way to run Seesaw ([below](#jobs)) |
 | `seesaw run "<question>" [--skip-hitl]` | The full Scout → Lens → Quill pipeline in this process. Records no job, uses no pathway, and Scout searches the literature. |
 | `seesaw plan "<question>"` | Scout only: question → research plan |
@@ -106,7 +107,7 @@ A job runs Scout, stops at a gate for your approval, runs Lens, stops at a secon
 | `--pathway auto` (default) | Scout reads every pathway's summary and picks the one that answers the question, with a one-sentence reason. If none fits, it picks none and plans the experiments itself. |
 | `--pathway <name>` | That pathway runs, and Scout only chooses its inputs. Use this when you know which one you want, and always for evaluation. |
 | `--pathway none` | No pathway; Scout plans freely |
-| `--model` | A model Lens runs on. Repeat it to run the pathway on several models, in order. The default is `google/gemma-2-2b`. The supported models are listed in [`shared/lens_tools.py`](shared/lens_tools.py). |
+| `--model` | A model Lens runs on. Repeat it to run the pathway on several models, in order. The default is `Qwen/Qwen2.5-1.5B`, which is open. `feature_explain` and the SAE tools need `google/gemma-2-2b` or `Qwen/Qwen2.5-7B-Instruct`. The supported models are listed in [`shared/lens_tools.py`](shared/lens_tools.py). |
 | `--other-model` | `model_diffing` only: the changed model to compare the first one with |
 | `--search` | Let Scout search arXiv and the web while planning. It's off by default, and without it Scout cites no papers as sources. |
 | `--auto-approve` | Run all stages without stopping at the gates |

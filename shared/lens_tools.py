@@ -147,10 +147,11 @@ LEVER_TOOLS: dict[str, LensTool] = {
 
 _CATALOGS: dict[str, dict[str, LensTool]] = {"seesaw": LENS_TOOLS, "lever": LEVER_TOOLS}
 
-# The model a job runs on when the user names none (CLI without --model, old
-# rows): the one every tool covers, feature_explain and circuit_tracing
-# included. Gated on Hugging Face, so the GPU app needs an HF token.
-DEFAULT_MODEL = "google/gemma-2-2b"
+# The model a job runs on when the user names none (CLI without --model).
+# Open on Hugging Face, so a first job needs no token or license approval.
+# It has no published SAEs: feature_explain and the SAE tools need
+# google/gemma-2-2b (gated) or Qwen/Qwen2.5-7B-Instruct, named with --model.
+DEFAULT_MODEL = "Qwen/Qwen2.5-1.5B"
 
 # The models Lens runs (TransformerLens names), with what each can and can't
 # do. The dashboard offers the same list. GPU sizes are shared/gpus.py's.

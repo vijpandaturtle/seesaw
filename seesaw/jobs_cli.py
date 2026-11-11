@@ -267,6 +267,9 @@ def cmd_submit(args) -> int:
                              params=_submit_params(args))
     except ValueError as exc:
         print(exc, file=sys.stderr)
+        if not args.model:
+            print(f"(no --model given, so the job used the default, {DEFAULT_MODEL}; "
+                  f"name another with --model)", file=sys.stderr)
         return 1
     used = start_stage(job.id, args.runner)
     print(f"job {job.id} queued at scout; runner: {used}\nweb: {_web_url(job.id)}")
