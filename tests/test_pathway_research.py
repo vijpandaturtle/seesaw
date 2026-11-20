@@ -181,6 +181,20 @@ def test_without_a_pathway_scout_is_unchanged(jobs, scout):
     assert after.plan_path.endswith("ioi_research_plan.md")
 
 
+def test_scout_is_briefed_on_the_behavior_and_its_examples(jobs, scout):
+    agents = scout(plan(params=None))
+    job = jobs.create("Caves to pushback", params={"behavior": {
+        "examples": [{"prompt": "Are you sure?", "output": "Sorry, you're right."}],
+        "action": "audit"}})
+
+    code, _ = run_stage(jobs, job.id)
+    assert code == 0
+    [message] = agents[0].messages
+    assert message.startswith("Caves to pushback")
+    for needed in ("## The behavior to investigate", '"Are you sure?"', "Audit: find a hidden problem", "## Models"):
+        assert needed in message
+
+
 def test_scout_chooses_the_pathways_inputs_and_they_are_saved(jobs, scout):
     agents = scout(plan(IOI))
     job = jobs.create("What heads mediate IOI?", params={"pathway": "circuit_discovery"})

@@ -111,7 +111,7 @@ def test_submit_takes_a_use_case(jobs, monkeypatch, capsys):
     assert seesaw(monkeypatch, *argv) == 0
     [job] = jobs.list_jobs()
     assert job.params_dict == {"use_case": "build_a_safety_monitor", "pathway": "probe_monitor",
-                               "models": [jobs.DEFAULT_MODEL]}
+                               "behavior": {"action": "monitor"}, "models": [jobs.DEFAULT_MODEL]}
 
 
 def test_use_cases_command_lists_and_writes_json(monkeypatch, capsys, tmp_path):

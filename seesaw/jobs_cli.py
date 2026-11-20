@@ -1,6 +1,7 @@
 """`seesaw jobs …` — submit and drive jobs in the shared job store from a terminal.
 
-    seesaw jobs submit "<question>" [--use-case U] [--pathway P|auto|none] [--search] [--model M ...] [--other-model M] [--auto-approve] [--follow]
+    seesaw jobs submit "<behavior>" [--example P ...] [--non-example P ...] [--action monitor|audit|fix|understand] [--use-case U] [--pathway P|auto|none] [--search] [--model M ...] [--other-model M] [--auto-approve] [--follow]
+    seesaw jobs submit --behavior-file behavior.yaml [...]
     seesaw jobs rerun <id> [--model M ...] [--auto-approve] [--follow]
     seesaw jobs list [--limit N] [--json]
     seesaw jobs show <id> [--json]
@@ -13,6 +14,21 @@
 Unlike `seesaw run`, which runs the pipeline in this process and records
 nothing, these go through the same job store the dashboard reads: a job
 submitted here shows up there, and one queued there can be approved here.
+
+A job starts from a behavior, not a research question: one sentence saying
+what the model does, with real prompts where it does it (`--example`), the
+closest ones where it doesn't (`--non-example`), and what to do about it
+(`--action`): monitor it, audit where it comes from, fix it, or understand
+it. With `--use-case`, the action is that use case's area. Examples with the
+model's outputs, or many of them, fit better in a file:
+
+    behavior: Gives up a correct answer when the user pushes back
+    action: audit
+    examples:
+      - prompt: "What's 17 x 24? ... User: Are you sure? I got 418."
+        output: "You're right, my apologies: it's 418."
+    non_examples:
+      - "What's 17 x 24? ... User: Thanks!"
 
 `--use-case` records which of seesaw.use_cases the job is for and runs its
 main pathway (`seesaw use-cases` lists them). `--pathway` makes one of seesaw.pathways part of the job; Scout chooses its
@@ -260,12 +276,36 @@ def _approve(job_id: str, runner: str) -> bool:
     return True
 
 
+def _behavior(args) -> tuple[str, dict]:
+    """The behavior sentence and params["behavior"], from the file and the flags (flags add to the file)."""
+    from seesaw import behavior
+
+    sentence, found = "", {}
+    if getattr(args, "behavior_file", None):
+        sentence, found = behavior.load(args.behavior_file)
+    if args.behavior:
+        sentence = args.behavior
+    if not sentence.strip():
+        raise ValueError('say what behavior to investigate: seesaw jobs submit "<behavior>", '
+                         "or --behavior-file")
+    extra = {
+        "examples": [*found.get("examples", []), *(getattr(args, "example", None) or [])],
+        "non_examples": [*found.get("non_examples", []), *(getattr(args, "non_example", None) or [])],
+        "action": getattr(args, "action", None) or found.get("action"),
+    }
+    return sentence.strip(), behavior.clean(extra)
+
+
 def cmd_submit(args) -> int:
     try:
-        job = _jobs().create(args.question, model=args.model or [DEFAULT_MODEL],
+        sentence, described = _behavior(args)
+        params = _submit_params(args) or {}
+        if described:
+            params["behavior"] = described
+        job = _jobs().create(sentence, model=args.model or [DEFAULT_MODEL],
                              auto_approve=args.auto_approve,
-                             params=_submit_params(args))
-    except ValueError as exc:
+                             params=params or None)
+    except (ValueError, OSError) as exc:
         print(exc, file=sys.stderr)
         if not args.model:
             print(f"(no --model given, so the job used the default, {DEFAULT_MODEL}; "
@@ -390,8 +430,20 @@ def add_parser(sub) -> None:
         p.add_argument("-f", "--follow", action="store_true",
                        help="stream the log until the job stops, asking at approval gates")
 
-    p = js.add_parser("submit", help="create a job and start its first stage")
-    p.add_argument("question")
+    p = js.add_parser("submit", help="create a job and start its first stage",
+                      description="Start a job on a behavior you want to investigate.")
+    p.add_argument("behavior", nargs="?",
+                   help="what the model does, in a sentence (or give --behavior-file)")
+    p.add_argument("--example", action="append", metavar="PROMPT",
+                   help="a real prompt where the model does it; repeat for several")
+    p.add_argument("--non-example", action="append", metavar="PROMPT",
+                   help="the closest prompt where it doesn't; repeat for several")
+    p.add_argument("--action", choices=("monitor", "audit", "fix", "understand"),
+                   help="what to do about it: monitor it at runtime, audit where it comes from, "
+                        "fix it, or understand how the model does it (default: the use case's area, "
+                        "or Scout infers it)")
+    p.add_argument("--behavior-file", metavar="PATH",
+                   help="YAML or JSON with behavior, examples (prompt and output), non_examples, action")
     p.add_argument("--pathway", default="auto",
                    help="auto (default): Scout chooses a pathway, or none, and its inputs; a name "
                         "(circuit_discovery, concept_direction, probe_monitor, spurious_audit, "

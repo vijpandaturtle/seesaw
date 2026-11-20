@@ -47,10 +47,11 @@ cp .env.example .env                 # set ANTHROPIC_API_KEY (and HF_TOKEN for G
 seesaw doctor                        # checks keys, model access, memory, torch and the job store
 ```
 
-Then ask a question whose answer is already known, so you can check the verdict:
+Then describe a behavior whose answer is already known, so you can check the verdict. A job starts from what the model does, in a sentence, with a real prompt where it does it and the closest one where it doesn't:
 
 ```bash
-seesaw jobs submit "Does the model use the gender a job title implies to choose 'she' or 'he'?" \
+seesaw jobs submit "Uses the gender a job title implies to choose 'she' or 'he'" \
+  --example "The nurse said that" --non-example "The person said that" \
   --pathway concept_direction --model Qwen/Qwen2.5-1.5B --follow
 ```
 
@@ -67,7 +68,7 @@ Leave out `--pathway` and Scout chooses one (or none, and plans the experiments 
 | Command | Does |
 |---|---|
 | `seesaw doctor [--model M]` | Check this machine is ready: keys, model access, memory and disk, torch, the job store |
-| `seesaw jobs submit "<question>"` | Start a research job: Scout → gate → Lens → gate → Quill. `--pathway`, `--model`, `--search`, `--auto-approve`, `--follow` |
+| `seesaw jobs submit "<behavior>"` | Start a job on a behavior: Scout → gate → Lens → gate → Quill. `--example`, `--non-example`, `--action`, `--behavior-file`, `--pathway`, `--model`, `--search`, `--auto-approve`, `--follow` |
 | `seesaw jobs list` / `show` / `logs` | See jobs, their status and artifacts, and the worker's log |
 | `seesaw jobs approve` / `retry` / `cancel` | Drive a job: clear a gate, re-run a failed stage, stop it |
 | `seesaw jobs rerun <id> [--model M]` | Run a job's pathway again on its approved inputs, from Lens, optionally on another model |
