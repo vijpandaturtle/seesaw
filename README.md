@@ -75,6 +75,7 @@ Leave out `--pathway` and Scout chooses one (or none, and plans the experiments 
 | `seesaw run "<question>"` | The whole pipeline in your terminal, with no job record and no pathway |
 | `seesaw plan "<question>"` · `seesaw critique <bundle.json>` | Scout only, or Quill only |
 | `seesaw use-cases [--json PATH]` | What Seesaw is for: each use case's metric, baseline, pathway and status |
+| `seesaw bench <use case>` | Benchmark a use case: the interp method against its baselines on public data, over models and seeds |
 | `seesaw eval <task>` · `seesaw fixtures` | The eval suite, and the meta-eval that checks its graders |
 
 The dashboard ([seesaw-web](https://github.com/vijpandaturtle/seesaw-web)) reads the same job store when it's Postgres (`DATABASE_URL`), so a job started in one shows in the other. Jobs in the local SQLite file don't show there. Set the same `SEESAW_DB_SCHEMA` on both sides to keep trial jobs apart from the live ones.
@@ -102,6 +103,19 @@ Seesaw is organized around AI safety jobs, not techniques. Each use case is scor
 | Fix (vision) | Remove a spurious background | Worst-group accuracy (Waterbirds) | Group reweighting, retraining the head | lever tools | Planned |
 
 "Baseline missing" means the pathway does the job but doesn't yet run the baseline arm or score the outcome metric, so its verdict doesn't answer the use case on its own. Most of the planned audits need model organisms: small models with a planted backdoor, objective or hidden capability, so an audit can be scored against the plant. Three more entries cover understanding a model, with no outcome to beat: understand a capability (`circuit_discovery`), locate a fact (`factual_recall`) and explain an output (`feature_explain`).
+
+### Benchmarks
+
+A use case's benchmark runs the interpretability method and the baselines directly, without the agents, on data whose labels are known, over several models and seeds. The win condition is written in the benchmark's docstring before anything runs.
+
+```bash
+uv pip install -e ".[experiments,bench]"
+seesaw bench build_a_safety_monitor --models Qwen/Qwen2.5-0.5B --device mps
+```
+
+It writes one row per model, test set, seed and arm to `outputs/bench/<use case>.jsonl`, a summary table to `<use case>.md`, and a plot of accuracy by layer per model. `--summarize <jsonl>` rebuilds the table without rerunning. So far only `build_a_safety_monitor` has one ([`seesaw/benchmarks/safety_monitor.py`](seesaw/benchmarks/safety_monitor.py)): a prompt-injection probe trained on `deepset/prompt-injections`, tested in-distribution and on two datasets from other authors, against embeddings-only, bag-of-words, TF-IDF and text-length classifiers.
+
+**Result ([docs/results/safety-monitor.md](docs/results/safety-monitor.md)):** on Qwen2.5-0.5B, Qwen2.5-1.5B and Llama-3.2-1B, the probe ties in-distribution (96–99% against 89–95% for embeddings alone) and loses under distribution shift. Text length alone beats it on SPML, and bag-of-words beats it on jailbreaks, where it doesn't transfer at all.
 
 ## Pathways
 

@@ -46,6 +46,11 @@ lever = [
 eval = [
     "pytest",
 ]
+# Use-case benchmarks (seesaw bench): public datasets and the text-only baselines
+bench = [
+    "datasets",
+    "scikit-learn",
+]
 # Running Lens experiments on Modal instead of in-process
 modal = [
     "modal",
@@ -54,7 +59,7 @@ modal = [
 postgres = [
     "psycopg[binary,pool]",
 ]
-all = ["seesaw[experiments,eval,modal,postgres]"]
+all = ["seesaw[experiments,bench,eval,modal,postgres]"]
 
 [project.scripts]
 seesaw = "seesaw.cli:main"

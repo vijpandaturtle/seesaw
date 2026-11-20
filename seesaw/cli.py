@@ -128,6 +128,33 @@ def _cmd_use_cases(args) -> int:
     return 0
 
 
+def _cmd_bench(args) -> int:
+    from . import benchmarks
+
+    if not args.use_case:
+        for name in benchmarks.names():
+            print(name)
+        return 0
+    bench = benchmarks.load(args.use_case)
+    out = Path(args.out)
+    if args.summarize:
+        rows = bench.read(args.summarize)
+    else:
+        d = bench.DEFAULTS
+        models = args.models.split(",") if args.models else d["models"]
+        tests = args.test_sets.split(",") if args.test_sets else d["test_sets"]
+        rows = bench.run(models, args.seeds or d["seeds"], out,
+                         max_tokens=args.max_tokens or d["max_tokens"],
+                         per_class=args.per_class or d["per_class"], test_sets=tests, device=args.device)
+    summary = bench.summarize(rows)
+    out.mkdir(parents=True, exist_ok=True)
+    (out / f"{args.use_case}.md").write_text(summary + "\n")
+    for path in bench.plot(rows, out):
+        print(f"plot: {path}")
+    print(summary)
+    return 0
+
+
 def _write_json(path: str, payload: dict) -> None:
     """Dump a result for the dashboard to read.
 
@@ -192,6 +219,18 @@ def main() -> int:
     p = sub.add_parser("use-cases", help="what seesaw is for: each use case, its metric, baseline and status")
     p.add_argument("--json", metavar="PATH", help="write the use-case catalog for the dashboard")
     p.set_defaults(fn=_cmd_use_cases)
+
+    p = sub.add_parser("bench", help="benchmark a use case: the interp method against baselines without it")
+    p.add_argument("use_case", nargs="?", help="which use case (omit to list the ones with a benchmark)")
+    p.add_argument("--models", help="comma-separated model names (default: the benchmark's)")
+    p.add_argument("--seeds", type=int, help="how many seeds")
+    p.add_argument("--test-sets", help="comma-separated test sets (default: all)")
+    p.add_argument("--max-tokens", type=int, help="cut every text to this many tokens")
+    p.add_argument("--per-class", type=int, help="texts per class in each sampled test set")
+    p.add_argument("--device", help="torch device: cpu, mps, cuda (default: TransformerLens's choice)")
+    p.add_argument("--out", default="outputs/bench", help="where rows, summary and plots go")
+    p.add_argument("--summarize", metavar="JSONL", help="re-summarize existing rows instead of running")
+    p.set_defaults(fn=_cmd_bench)
 
     p = sub.add_parser("fixtures", help="grader meta-eval")
     p.add_argument("--llm", nargs="?", const="", metavar="AGENT",
