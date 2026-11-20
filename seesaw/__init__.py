@@ -1,4 +1,4 @@
-"""Seesaw — a multi-agent framework for automated mechanistic interpretability research.
+"""Seesaw — accessible, pragmatic interpretability with agentic AI.
 
 Public API (everything else in this repo is internal):
 

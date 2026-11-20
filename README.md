@@ -2,7 +2,7 @@
 
 # Seesaw
 
-**Accessible, pragmatic interpretability.**
+**Accessible, pragmatic interpretability with agentic AI.**
 
 [![License: Apache 2.0](https://img.shields.io/badge/license-Apache%202.0-blue.svg)](LICENSE)
 [![Python 3.11–3.12](https://img.shields.io/badge/python-3.11%E2%80%933.12-blue.svg)](pyproject.toml)
