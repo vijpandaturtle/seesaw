@@ -61,6 +61,13 @@
   h1 { font: 600 clamp(36px, 6vw, 60px)/1.05 var(--serif); letter-spacing: -.035em; margin: 0 0 28px; }
   .tagline { font-size: 16.5px; max-width: 700px; color: var(--muted); margin: 0 auto 32px; }
   .cta-row { display: flex; flex-wrap: wrap; gap: 10px; justify-content: center; }
+  a.repo-card { display: inline-flex; align-items: center; gap: 10px; padding: 9px 16px; border: 1px solid var(--line); border-radius: 12px; background: var(--surface); color: var(--text); text-decoration: none; }
+  a.repo-card:hover { border-color: var(--accent); color: var(--text); }
+  .repo-card svg { flex-shrink: 0; }
+  .repo-card .repo-name { display: block; font: 600 14.5px/1.35 var(--sans); text-align: left; }
+  .repo-card .repo-meta { display: flex; gap: 12px; font: 12px/1.35 var(--mono); color: var(--muted); }
+  .repo-card .repo-meta > span { display: inline-flex; align-items: center; gap: 4px; }
+  .repo-card .repo-meta > span[hidden] { display: none; }
   .btn {
     text-decoration: none; padding: 9px 16px; border-radius: 999px; font-size: 13px; font-weight: 500;
     border: 1px solid var(--line); background: var(--surface);
@@ -178,10 +185,9 @@
     <a class="brand" href="#">Seesaw<span>.</span></a>
     <nav>
       <a href="#overview">Overview</a>
-      <a href="#moments">What you can do</a>
+      <a href="#features">Features</a>
       <a href="#start">Get started</a>
       <a href="#agents">Agents</a>
-      <a href="https://vijpandaturtle.github.io/">Vijayasri Iyer ↗</a>
     </nav>
   </div>
 </div>
@@ -192,9 +198,17 @@
     <h1>Seesaw</h1>
     <p class="tagline">Accessible, pragmatic interpretability.</p>
     <div class="cta-row">
-      <a class="btn primary" href="https://github.com/vijpandaturtle/seesaw">GitHub</a>
-      <a class="btn" href="https://seesaw-web-five.vercel.app/">Live Dashboard ↗</a>
-      <a class="btn" href="https://mindsandai.substack.com/s/build-logs">Build Log ↗</a>
+      <a class="repo-card" href="https://github.com/vijpandaturtle/seesaw" aria-label="vijpandaturtle/seesaw on GitHub">
+        <svg width="28" height="28" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="M8 0c4.42 0 8 3.58 8 8a8.013 8.013 0 0 1-5.45 7.59c-.4.08-.55-.17-.55-.38 0-.27.01-1.13.01-2.2 0-.75-.25-1.23-.54-1.48 1.78-.2 3.65-.88 3.65-3.95 0-.88-.31-1.59-.82-2.15.08-.2.36-1.02-.08-2.12 0 0-.67-.22-2.2.82-.64-.18-1.32-.27-2-.27-.68 0-1.36.09-2 .27-1.53-1.03-2.2-.82-2.2-.82-.44 1.1-.16 1.92-.08 2.12-.51.56-.82 1.28-.82 2.15 0 3.06 1.86 3.75 3.64 3.95-.23.2-.44.55-.51 1.07-.46.21-1.61.55-2.33-.66-.15-.24-.6-.83-1.23-.82-.67.01-.27.38.01.53.34.19.73.9.82 1.13.16.45.68 1.31 2.69.94 0 .67.01 1.3.01 1.49 0 .21-.15.45-.55.38A7.995 7.995 0 0 1 0 8c0-4.42 3.58-8 8-8Z"/></svg>
+        <span>
+          <span class="repo-name">vijpandaturtle/seesaw</span>
+          <span class="repo-meta">
+            <span><svg width="13" height="13" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="M1 7.775V2.75C1 1.784 1.784 1 2.75 1h5.025c.464 0 .91.184 1.238.513l6.25 6.25a1.75 1.75 0 0 1 0 2.474l-5.026 5.026a1.75 1.75 0 0 1-2.474 0l-6.25-6.25A1.752 1.752 0 0 1 1 7.775Zm1.5 0c0 .066.026.13.073.177l6.25 6.25a.25.25 0 0 0 .354 0l5.025-5.025a.25.25 0 0 0 0-.354l-6.25-6.25a.25.25 0 0 0-.177-.073H2.75a.25.25 0 0 0-.25.25ZM6 5a1 1 0 1 1 0 2 1 1 0 0 1 0-2Z"/></svg>v0.1.0</span>
+            <span id="repo-stars-wrap" hidden><svg width="13" height="13" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="M8 .25a.75.75 0 0 1 .673.418l1.882 3.815 4.21.612a.75.75 0 0 1 .416 1.279l-3.046 2.97.719 4.192a.75.75 0 0 1-1.088.791L8 12.347l-3.766 1.98a.75.75 0 0 1-1.088-.79l.72-4.194L.818 6.374a.75.75 0 0 1 .416-1.28l4.21-.611L7.327.668A.75.75 0 0 1 8 .25Z"/></svg><span id="repo-stars"></span></span>
+            <span id="repo-forks-wrap" hidden><svg width="13" height="13" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="M5 5.372v.878c0 .414.336.75.75.75h4.5a.75.75 0 0 0 .75-.75v-.878a2.25 2.25 0 1 1 1.5 0v.878a2.25 2.25 0 0 1-2.25 2.25h-1.5v2.128a2.251 2.251 0 1 1-1.5 0V8.5h-1.5A2.25 2.25 0 0 1 3.5 6.25v-.878a2.25 2.25 0 1 1 1.5 0ZM5 3.25a.75.75 0 1 0-1.5 0 .75.75 0 0 0 1.5 0Zm6.75.75a.75.75 0 1 0 0-1.5.75.75 0 0 0 0 1.5Zm-3 8.75a.75.75 0 1 0-1.5 0 .75.75 0 0 0 1.5 0Z"/></svg><span id="repo-forks"></span></span>
+          </span>
+        </span>
+      </a>
     </div>
   </div>
 </header>
@@ -214,9 +228,9 @@
   </div>
 </section>
 
-<section id="moments">
+<section id="features">
   <div class="wrap">
-    <h2>What you can do</h2>
+    <h2>Features</h2>
     <p>Pick what you want. Each one is compared with the simple option that doesn&#x27;t look inside the model, and Seesaw tells you when the simple option is enough.</p>
     <div class="uc-grid moments">
         <div class="uc runnable">
@@ -311,5 +325,25 @@ seesaw jobs submit "Uses the gender a job title implies to choose 'she' or 'he'"
   </div>
 </footer>
 
+<script>
+  // Stars and forks from GitHub's public API, each shown only once it's above
+  // zero; if the call fails the card shows just the name and version.
+  (function () {
+    var fmt = function (n) { return n >= 1000 ? (n / 1000).toFixed(1).replace(/\.0$/, "") + "k" : String(n); };
+    var show = function (id, n) {
+      if (!(n > 0)) return;
+      document.getElementById(id).textContent = fmt(n);
+      document.getElementById(id + "-wrap").hidden = false;
+    };
+    fetch("https://api.github.com/repos/vijpandaturtle/seesaw")
+      .then(function (r) { return r.ok ? r.json() : null; })
+      .then(function (repo) {
+        if (!repo) return;
+        show("repo-stars", repo.stargazers_count);
+        show("repo-forks", repo.forks_count);
+      })
+      .catch(function () {});
+  })();
+</script>
 </body>
 </html>

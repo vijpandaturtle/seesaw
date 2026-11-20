@@ -9,7 +9,7 @@
 [![Built with LangGraph](https://img.shields.io/badge/built%20with-LangGraph-1c1c1c.svg)](https://github.com/langchain-ai/langgraph)
 [![MCP](https://img.shields.io/badge/protocol-MCP-purple.svg)](https://modelcontextprotocol.io)
 
-[Setup & Usage Docs](DOCS.md) · [What you can do](#what-you-can-do) · [Pathways](#pathways) · [Architecture](#architecture) · [Blog](https://mindsandai.substack.com)
+[Setup & Usage Docs](DOCS.md) · [Features](#features) · [Pathways](#pathways) · [Architecture](#architecture) · [Blog](https://mindsandai.substack.com)
 
 </div>
 
@@ -82,7 +82,7 @@ The dashboard ([seesaw-web](https://github.com/vijpandaturtle/seesaw-web)) reads
 
 <br>
 
-## What you can do
+## Features
 
 | Choose | You bring | You get | Status |
 |---|---|---|---|
