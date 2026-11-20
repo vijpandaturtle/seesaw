@@ -23,7 +23,7 @@
 
 ## Overview
 
-Models show unexpected behaviors at every stage of development, and interpretability has proven useful for finding them. But new models arrive faster than experts can study them. Seesaw uses AI agents to automate interpretability: investigate a behavior, see what changed between versions, and understand why your model behaves the way it does. Newcomers get answers they can act on, and researchers get through more models, faster.
+Models show unexpected behaviors at every stage of development, and interpretability has proven useful for finding them. But new models arrive faster than experts can study them. Seesaw uses AI agents to automate interpretability: diagnose a behavior you've seen, screen a model before you ship it, compare two versions after a change, and understand why your model behaves the way it does. Newcomers get answers they can act on, and researchers get through more models, faster.
 
 <div align="center">
 
@@ -85,8 +85,8 @@ The dashboard ([seesaw-web](https://github.com/vijpandaturtle/seesaw-web)) reads
 
 | Moment | You bring | You get | Status |
 |---|---|---|---|
-| **Investigate:** you saw it do something | The behavior, a few prompts where it happens and where it doesn't, your model; then monitor, audit or fix | A verdict against the simple option (a text classifier, a better prompt), and the detector or fix when it wins | Monitor runs end to end; audit and fix don't yet run the comparison |
-| **Check:** before you ship it | Your model, and the behaviors to check | An audit of each: is it there, and where does it come from | Each behavior runs as its own job; only prompt injection has a dataset and pass/fail rule |
+| **Diagnose:** you saw it do something | The behavior, a few prompts where it happens and where it doesn't, your model; then monitor, audit or fix | A verdict against the simple option (a text classifier, a better prompt), and the detector or fix when it wins | Monitor runs end to end; audit and fix don't yet run the comparison |
+| **Screen:** before you ship it | Your model, and the behaviors to screen for | An audit of each: is it there, and where does it come from | Each behavior runs as its own job; only prompt injection has a dataset and pass/fail rule |
 | **Compare:** after you change it | The model before and after, and the behavior you're worried about | Where the two versions differ on it (`model_diffing`) | Rerunning earlier checks on the new version isn't built yet |
 
 Every outcome is scored against the best way to do the same job without interpretability, so a result says whether looking inside the model actually helped. The full list of safety jobs, with each one's metric, baseline and status, including the planned ones, is in [`seesaw/use_cases.py`](seesaw/use_cases.py); `seesaw use-cases` prints it.

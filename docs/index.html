@@ -202,7 +202,7 @@
 <section id="overview">
   <div class="wrap">
     <h2>Overview</h2>
-    <p>Models show unexpected behaviors at every stage of development, and interpretability has proven useful for finding them. But new models arrive faster than experts can study them. Seesaw uses AI agents to automate interpretability: investigate a behavior, see what changed between versions, and understand why your model behaves the way it does. Newcomers get answers they can act on, and researchers get through more models, faster.</p>
+    <p>Models show unexpected behaviors at every stage of development, and interpretability has proven useful for finding them. But new models arrive faster than experts can study them. Seesaw uses AI agents to automate interpretability: diagnose a behavior you've seen, screen a model before you ship it, compare two versions after a change, and understand why your model behaves the way it does. Newcomers get answers they can act on, and researchers get through more models, faster.</p>
     <div class="pipeline">
       <span class="stage">Scout</span>
       <span class="arrow">behavior + examples → plan →</span>
@@ -220,7 +220,7 @@
     <p>There are three moments when you need to look inside a model. Each one asks you for something you already have, and gives you something you can act on.</p>
     <div class="uc-grid moments">
         <div class="uc runnable">
-          <div class="uc-head"><h3>Investigate: you saw it do something</h3><span class="pill runnable">Works today</span></div>
+          <div class="uc-head"><h3>Diagnose: you saw it do something</h3><span class="pill runnable">Works today</span></div>
           <p class="q">A user reports that the model caved to pushback, leaked its system prompt or refused something harmless.</p>
           <dl>
             <dt>You bring</dt><dd>the behavior in a sentence, a few prompts where it happens, a few where it doesn&#x27;t, and your model</dd>
@@ -230,10 +230,10 @@
           <p class="gap">Monitor runs end to end. Audit and fix run their method, but don&#x27;t yet run the comparison with the simple option.</p>
         </div>
         <div class="uc partial">
-          <div class="uc-head"><h3>Check: before you ship it</h3><span class="pill partial">Partly built</span></div>
+          <div class="uc-head"><h3>Screen: before you ship it</h3><span class="pill partial">Partly built</span></div>
           <p class="q">You&#x27;re about to deploy a model and want to know whether it has the usual problems.</p>
           <dl>
-            <dt>You bring</dt><dd>your model, and the behaviors to check from the library: prompt injection, sycophancy, prompt leaks and more</dd>
+            <dt>You bring</dt><dd>your model, and the behaviors to screen for, from the library: prompt injection, sycophancy, prompt leaks and more</dd>
             <dt>You get</dt><dd>an audit of each behavior: is it there, and where does it come from</dd>
           </dl>
           <p class="gap">Only prompt injection has a dataset and a pass/fail rule so far, and each behavior comes back as its own job, not one scorecard.</p>
@@ -255,7 +255,7 @@
 <section id="start">
   <div class="wrap">
     <h2>Get started</h2>
-    <p>Install with the experiment stack, add an Anthropic key, and investigate a behavior whose answer is already known, so you can check the verdict.</p>
+    <p>Install with the experiment stack, add an Anthropic key, and diagnose a behavior whose answer is already known, so you can check the verdict.</p>
 <pre class="code"><span class="c"># install (Lens needs torch + TransformerLens)</span>
 uv venv .venv --python 3.12 &amp;&amp; source .venv/bin/activate
 uv pip install -e ".[experiments]"
