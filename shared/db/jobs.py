@@ -388,7 +388,10 @@ def create(question: str, model: str | list[str] = DEFAULT_MODEL, auto_approve: 
             {"other_model": name} is what model_diffing compares the first
             model with, when the user chose it. {"use_case": name} records
             which of seesaw.use_cases the job is for; with no pathway given,
-            the use case's main pathway runs.
+            the use case's main pathway runs. {"behavior": {...}} carries the
+            user's examples, non-examples and action (seesaw.behavior);
+            `question` is then the behavior, in a sentence. A use case
+            sets the action to its area, and a different one is refused.
 
     Returns:
         The created Job.
@@ -403,10 +406,17 @@ def create(question: str, model: str | list[str] = DEFAULT_MODEL, auto_approve: 
 
     models = catalog.as_models(model)
     params = dict(params or {})
-    if not set(params) <= {"pathway", "search", "other_model", "use_case"}:
+    if not set(params) <= {"pathway", "search", "other_model", "use_case", "behavior"}:
         raise ValueError("a research job's params are only {\"pathway\": name or \"auto\", "
-                         "\"search\": bool, \"other_model\": name, \"use_case\": name}; "
+                         "\"search\": bool, \"other_model\": name, \"use_case\": name, "
+                         "\"behavior\": {examples, non_examples, action}}; "
                          "Scout chooses the pathway's inputs")
+    if not question.strip():
+        raise ValueError("say what behavior to investigate, in a sentence")
+    if "behavior" in params:
+        from seesaw import behavior
+
+        params["behavior"] = behavior.clean(params["behavior"]) or None
     if params.get("use_case") is not None:
         case = use_cases.USE_CASES.get(params["use_case"])
         if case is None:
@@ -414,6 +424,10 @@ def create(question: str, model: str | list[str] = DEFAULT_MODEL, auto_approve: 
                              f"{use_cases.names()}")
         if case.status == "planned":
             raise ValueError(f"use case {params['use_case']!r} is planned, not runnable yet: {case.gap}")
+        action = (params.get("behavior") or {}).get("action")
+        if action and action != case.area:
+            raise ValueError(f"use case {params['use_case']!r} is for {case.area}, not {action}")
+        params["behavior"] = {**(params.get("behavior") or {}), "action": case.area}
         params.setdefault("pathway", case.pathways[0])
         if params["pathway"] not in case.pathways:
             raise ValueError(f"use case {params['use_case']!r} runs {' or '.join(case.pathways)}, "
@@ -477,7 +491,7 @@ def rerun(job_id: str, model: str | list[str] | None = None, auto_approve: bool 
     if problems:
         raise ValueError(f"job {job_id}'s inputs can't run on {catalog._on(models)}: " + "; ".join(problems))
     copied = {"pathway": name, "pathway_params": inputs, "rerun_of": source.id, "models": models}
-    for key in ("other_model", "use_case"):
+    for key in ("other_model", "use_case", "behavior"):
         if params.get(key):
             copied[key] = params[key]
     return _insert(source.question, models[0], "lens", auto_approve, copied,

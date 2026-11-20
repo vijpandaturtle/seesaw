@@ -26,8 +26,9 @@ uv pip install -e ".[experiments]"
 cp .env.example .env
 # edit .env: set ANTHROPIC_API_KEY (required), and HF_TOKEN to run the gated Gemma or Llama models
 
-# 4. Run a job on a question with a known answer (Qwen2.5 is open: no HF token needed)
-seesaw jobs submit "Does the model use the gender a job title implies to choose 'she' or 'he'?" \
+# 4. Run a job on a behavior with a known answer (Qwen2.5 is open: no HF token needed)
+seesaw jobs submit "Uses the gender a job title implies to choose 'she' or 'he'" \
+  --example "The nurse said that" --non-example "The person said that" \
   --pathway concept_direction --model Qwen/Qwen2.5-1.5B --follow
 ```
 
@@ -83,8 +84,11 @@ Deployment adds several more; see [Deployment → Environment reference](#enviro
 ### Jobs
 
 ```bash
-seesaw jobs submit "<question>" [--pathway auto|none|<name>] [--model M ...] [--other-model M] [--search] [--auto-approve] [--follow]
+seesaw jobs submit "<behavior>" [--example P ...] [--non-example P ...] [--action monitor|audit|fix|understand] [--pathway auto|none|<name>]
+seesaw jobs submit --behavior-file behavior.yaml [...] [--model M ...] [--other-model M] [--search] [--auto-approve] [--follow]
 ```
+
+A job starts from a behavior, not a research question: one sentence saying what the model does, real prompts where it does it (`--example`), the closest ones where it doesn't (`--non-example`), and what to do about it (`--action`): monitor it at runtime, audit where it comes from, fix it, or understand how the model does it. The action narrows Scout to that area's use cases and decides what the result is scored against; `--use-case` sets it to the use case's area. Scout builds its prompts from the examples and restates the behavior as a testable claim in its plan. Examples with the model's outputs fit better in a YAML file (`--behavior-file`, format in `seesaw jobs submit --help` and [`seesaw/behavior.py`](seesaw/behavior.py)); flags add to what the file gives.
 
 A job runs Scout, stops at a gate for your approval, runs Lens, stops at a second gate, then runs Quill. The job store records the job, so with a Postgres store (`DATABASE_URL`) a job submitted here shows in the dashboard, and one queued from the dashboard can be approved here. The dashboard reads only Postgres: a job in the local SQLite file (no `DATABASE_URL`, or `SEESAW_DB_PATH` set) shows only in the CLI. For trial runs, set `SEESAW_DB_SCHEMA` (on both sides) to use an isolated copy of the tables.
 

@@ -73,6 +73,13 @@ _PATHWAY_DONE = (
 
 
 # ── Stages ───────────────────────────────────────────────────────────────────
+def _behavior_brief(job: Job) -> str:
+    """What to investigate, with the user's examples, ahead of the rest of Scout's brief."""
+    from seesaw import behavior
+
+    return behavior.brief(job.question, job.params_dict.get("behavior")) + "\n\n"
+
+
 def run_scout_stage(job: Job) -> None:
     from .clients.scout_client import MAX_REVISIONS, run_scout
 
@@ -89,7 +96,7 @@ def run_scout_stage(job: Job) -> None:
     if not name:
         plan_path = run_scout(job.question, thread_id=f"job-{job.id}-scout",
                               output_dir=jobs.job_dir(job.id), search=search,
-                              brief=catalog.models_brief(models),
+                              brief=_behavior_brief(job) + catalog.models_brief(models),
                               check=lambda path: catalog.plan_model_errors(path.read_text(), models))
         jobs.update(job.id, plan_path=str(plan_path))
         return
@@ -105,7 +112,7 @@ def run_scout_stage(job: Job) -> None:
 
     plan_path = run_scout(job.question, thread_id=f"job-{job.id}-scout",
                           output_dir=jobs.job_dir(job.id), search=search,
-                          brief=catalog.scout_brief(name, models, other) + "\n\n"
+                          brief=_behavior_brief(job) + catalog.scout_brief(name, models, other) + "\n\n"
                           + catalog.models_brief(models), check=check)
     inputs, errors = catalog.extract_inputs(name, plan_path.read_text(), models, other)
     # Inputs from an earlier Scout run don't belong to this plan.
@@ -135,7 +142,8 @@ def _scout_chooses(job: Job, params: dict, search: bool) -> None:
 
     plan_path = run_scout(job.question, thread_id=f"job-{job.id}-scout",
                           output_dir=jobs.job_dir(job.id), search=search,
-                          brief=catalog.choice_brief(models, other) + "\n\n" + catalog.models_brief(models),
+                          brief=_behavior_brief(job) + catalog.choice_brief(models, other) + "\n\n"
+                          + catalog.models_brief(models),
                           check=check)
     name, inputs, why, errors = catalog.extract_choice(plan_path.read_text(), models, other)
     # Whatever an earlier Scout run chose doesn't belong to this plan.
