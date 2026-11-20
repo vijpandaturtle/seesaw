@@ -9,7 +9,7 @@
 [![Built with LangGraph](https://img.shields.io/badge/built%20with-LangGraph-1c1c1c.svg)](https://github.com/langchain-ai/langgraph)
 [![MCP](https://img.shields.io/badge/protocol-MCP-purple.svg)](https://modelcontextprotocol.io)
 
-[Setup & Usage Docs](DOCS.md) · [When to use it](#when-youd-use-it) · [Pathways](#pathways) · [Architecture](#architecture) · [Blog](https://mindsandai.substack.com)
+[Setup & Usage Docs](DOCS.md) · [What you can do](#what-you-can-do) · [Pathways](#pathways) · [Architecture](#architecture) · [Blog](https://mindsandai.substack.com)
 
 </div>
 
@@ -23,7 +23,7 @@
 
 ## Overview
 
-Models show unexpected behaviors at every stage of development, and interpretability has proven useful for finding them. But new models arrive faster than experts can study them. Seesaw uses AI agents to automate interpretability: diagnose a behavior you've seen, screen a model before you ship it, compare two versions after a change, and understand why your model behaves the way it does. Newcomers get answers they can act on, and researchers get through more models, faster.
+Models show unexpected behaviors at every stage of development, and interpretability has proven useful for finding them. But new models arrive faster than experts can study them. Seesaw uses AI agents to automate interpretability: monitor a behavior at runtime, audit a model when it surprises you, before you ship it or after you change it, and fix what you find. Newcomers get answers they can act on, and researchers get through more models, faster.
 
 <div align="center">
 
@@ -82,13 +82,13 @@ The dashboard ([seesaw-web](https://github.com/vijpandaturtle/seesaw-web)) reads
 
 <br>
 
-## When you'd use it
+## What you can do
 
-| Moment | You bring | You get | Status |
+| Choose | You bring | You get | Status |
 |---|---|---|---|
-| **Diagnose:** you saw it do something | The behavior, a few prompts where it happens and where it doesn't, your model; then monitor, audit or fix | A verdict against the simple option (a text classifier, a better prompt), and the detector or fix when it wins | Monitor runs end to end; audit and fix don't yet run the comparison |
-| **Screen:** before you ship it | Your model, and the behaviors to screen for | An audit of each: is it there, and where does it come from | Each behavior runs as its own job; only prompt injection has a dataset and pass/fail rule |
-| **Compare:** after you change it | The model before and after, and the behavior you're worried about | Where the two versions differ on it (`model_diffing`) | Rerunning earlier checks on the new version isn't built yet |
+| **Monitor:** catch it at runtime | The behavior, a few prompts where it happens and where it doesn't, your model | A detector on the model's activations, recommended only if it beats a text classifier on the same examples | Works end to end |
+| **Audit:** find out if it's there, and why | A behavior with examples, a checklist of known behaviors, or the model before and after a change | Whether it's built into the model and where it comes from, or where two versions differ (`model_diffing`) | The checklist runs one audit per behavior and only prompt injection has a dataset; earlier audits aren't rerun on a new version yet |
+| **Fix:** remove it from the model | The behavior, examples, your model | A change to the model that removes the behavior, recommended only if it beats a better prompt without breaking anything else | Fixes run and are checked for damage elsewhere, but not yet compared with a better prompt |
 
 Every outcome is scored against the best way to do the same job without interpretability, so a result says whether looking inside the model actually helped. The full list of safety jobs, with each one's metric, baseline and status, including the planned ones, is in [`seesaw/use_cases.py`](seesaw/use_cases.py); `seesaw use-cases` prints it.
 
