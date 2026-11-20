@@ -54,7 +54,11 @@ def _bag_of_words(model, train: list[str], test: list[str]) -> tuple[torch.Tenso
     """Token-count vectors over the training vocabulary, for the no-model baseline."""
     def ids(texts):
         return [model.to_tokens(t, prepend_bos=False)[0].tolist() for t in texts]
-    train_ids, test_ids = ids(train), ids(test)
+    return bag_of_words_from_ids(ids(train), ids(test))
+
+
+def bag_of_words_from_ids(train_ids: list[list[int]], test_ids: list[list[int]]) -> tuple[torch.Tensor, torch.Tensor]:
+    """Token-count vectors over the training vocabulary, from token ids already computed."""
     vocab = {t: i for i, t in enumerate(sorted({t for row in train_ids for t in row}))}
 
     def counts(rows):
@@ -65,6 +69,28 @@ def _bag_of_words(model, train: list[str], test: list[str]) -> tuple[torch.Tenso
                     out[r, vocab[t]] += 1
         return out
     return counts(train_ids), counts(test_ids)
+
+def score(train, y_train, test, y_test, embed_train, embed_test, bow_train, bow_test, *,
+          n_folds: int = 5, weight_decay: float = 1e-2, n_shuffles: int = 5, seed: int = 0) -> dict:
+    """The method on features already extracted: choose a layer on train, score it and the baselines on test.
+
+    `train` and `test` are [n_layers, n, d_model] residual streams; the
+    embeddings and bag-of-words matrices are one row per text. Split out of
+    compute() so a benchmark can extract features once and score many splits
+    with exactly the pathway's procedure.
+    """
+    n_folds = max(2, min(n_folds, int(y_train.sum()), int((1 - y_train).sum())))
+    cv = [_cv(layer, y_train, n_folds, weight_decay, torch.Generator().manual_seed(seed)) for layer in train]
+    test_acc = [_accuracy(tr, y_train, te, y_test, weight_decay) for tr, te in zip(train, test)]
+    best = max(range(len(cv)), key=lambda l: (cv[l], -l))
+    gen = torch.Generator().manual_seed(seed + 1)
+    shuffled = [_accuracy(train[best], y_train[torch.randperm(len(y_train), generator=gen)],
+                          test[best], y_test, weight_decay) for _ in range(n_shuffles)]
+    return {
+        "cv": cv, "test_acc": test_acc, "best": best, "shuffled": shuffled,
+        "layer0": _accuracy(embed_train, y_train, embed_test, y_test, weight_decay),
+        "text_baseline": _accuracy(bow_train, y_train, bow_test, y_test, weight_decay),
+    }
 
 
 def compute(
@@ -105,21 +131,15 @@ def compute(
                   for t in prompts + contrast_prompts + test_prompts + test_contrast_prompts]
     y_train = torch.tensor([1.0] * len(prompts) + [0.0] * len(contrast_prompts))
     y_test = torch.tensor([1.0] * len(test_prompts) + [0.0] * len(test_contrast_prompts))
-    n_folds = max(2, min(n_folds, len(prompts), len(contrast_prompts)))
-
-    cv = [_cv(layer, y_train, n_folds, weight_decay, torch.Generator().manual_seed(seed)) for layer in train]
-    test_acc = [_accuracy(tr, y_train, te, y_test, weight_decay) for tr, te in zip(train, test)]
-    best = max(range(len(cv)), key=lambda l: (cv[l], -l))
-
-    gen = torch.Generator().manual_seed(seed + 1)
-    shuffled = [_accuracy(train[best], y_train[torch.randperm(len(y_train), generator=gen)],
-                          test[best], y_test, weight_decay) for _ in range(n_shuffles)]
     n_train = len(y_train)
-    embed_train, embed_test = torch.stack(embeds[:n_train]), torch.stack(embeds[n_train:])
-    layer0 = _accuracy(embed_train, y_train, embed_test, y_test, weight_decay)
     bow_train, bow_test = _bag_of_words(
         model, prompts + contrast_prompts, test_prompts + test_contrast_prompts)
-    text_baseline = _accuracy(bow_train, y_train, bow_test, y_test, weight_decay)
+    s = score(train, y_train, test, y_test,
+              torch.stack(embeds[:n_train]), torch.stack(embeds[n_train:]), bow_train, bow_test,
+              n_folds=min(n_folds, len(prompts), len(contrast_prompts)),
+              weight_decay=weight_decay, n_shuffles=n_shuffles, seed=seed)
+    cv, test_acc, best = s["cv"], s["test_acc"], s["best"]
+    shuffled, layer0, text_baseline = s["shuffled"], s["layer0"], s["text_baseline"]
 
     # ── Plot ──────────────────────────────────────────────────────────────────
     fig, ax = plt.subplots(figsize=(8, 4))
